@@ -82,6 +82,14 @@
 - Se o botão do token não abrir, use o clique direito no token → "⚡ Acesso rápido".
 - Janelas da ficha com barra de rolagem própria (3.4.1).
 
+## Novidades da versão 3.7 — importar da CRIS
+
+- **☰ → Importar da CRIS:** cole o link da ficha no site da CRIS (crisordemparanormal.com/agente/…). Vêm nome, jogador, origem, classe, NEX, deslocamento, atributos, PV, PE e Sanidade (ou Determinação), perícias com treino e bônus, armas, proteções e itens, ataques, rituais, poderes e os textos de histórico, aparência, personalidade e objetivo.
+- A ficha vira uma **cópia** aqui. O que você muda na extensão não volta para a CRIS.
+- **☰ → Atualizar PV e recursos pela CRIS:** aparece nas fichas importadas. Traz de novo PV, PE/PD, Sanidade, NEX e atributos, sem mexer no resto.
+- Se a classe da CRIS não existir aqui (ex.: Sobrevivente), a ficha fica como Combatente e um aviso vai para as Notas.
+- Depende do jeito como a CRIS guarda as fichas hoje (leitura pública do banco dela). Se a CRIS mudar isso, a importação para de funcionar até ser ajustada.
+
 ## Observação
 
 A sincronização usa as mensagens da sala do Owlbear. A interface esconde as fichas dos outros jogadores, mas os dados passam pelo navegador de todos os participantes, então não é um sigilo à prova de quem souber abrir as ferramentas de desenvolvedor.

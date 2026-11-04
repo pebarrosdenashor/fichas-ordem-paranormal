@@ -1,4 +1,5 @@
 import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+import { buscarCris, crisParaFicha, crisId } from "./cris.js";
 
 /* =========================================================
    Ficha de Ordem Paranormal — extensão para Owlbear Rodeo
@@ -2291,6 +2292,8 @@ function menuDialog() {
     ${pend.length ? `<p class="warn">⚠ Sem backup recente: ${pend.map((x) => esc(x.header.personagem)).join(", ")}. Exporte para não perder nada.</p>` : ""}
     ${s ? `<button id="mExport">Exportar esta ficha (backup)</button>` : ""}
     <button id="mImport">Importar ficha ou backup (.json)</button>
+    <button id="mCris">Importar da CRIS (link da ficha)</button>
+    ${s?.cris ? `<button id="mCrisUp">Atualizar PV e recursos pela CRIS</button>` : ""}
     ${s ? `<button id="mPrint">Baixar versão para imprimir / PDF</button>` : ""}
     ${obrOk ? `<div class="sep">Backup na cena do Owlbear</div>
       ${isGM() ? `<button id="mSceneSave">Salvar backup de todas as fichas nesta cena</button>` : ""}
@@ -2304,6 +2307,8 @@ function menuDialog() {
     <button data-close>Fechar</button>`);
   w.querySelector("#mExport")?.addEventListener("click", () => { w.remove(); exportDialog(s); });
   w.querySelector("#mImport").addEventListener("click", () => { w.remove(); importDialog(); });
+  w.querySelector("#mCris").addEventListener("click", () => { w.remove(); crisDialog(); });
+  w.querySelector("#mCrisUp")?.addEventListener("click", () => { w.remove(); crisAtualizar(s); });
   w.querySelector("#mPrint")?.addEventListener("click", () => { w.remove(); downloadFile(`${(s.header.personagem || "ficha").replace(/[^\w\-]+/g, "_")}-imprimir.html`, printHTML(s), "text/html"); toast("Abra o arquivo baixado e use “Imprimir / salvar em PDF”."); });
   w.querySelector("#mSceneSave")?.addEventListener("click", () => { w.remove(); backupToScene(); });
   w.querySelector("#mSceneLoad")?.addEventListener("click", () => { w.remove(); restoreFromScene(); });
@@ -2361,6 +2366,44 @@ function importDialog() {
     pick.click();
   });
 }
+/* ---------- Importar da CRIS (crisordemparanormal.com) ---------- */
+const CRIS_CTX = { newSheet, newItem, SCHEMAS, PERICIAS, CLASSES, TIPOS_DANO, ALCANCES, ELEMENTOS, EXECUCOES, ALC_RITUAL };
+function crisDialog() {
+  const w = dialog(`<h3>Importar da CRIS</h3>
+    <p class="muted">Cole o link da ficha no site da CRIS (crisordemparanormal.com/agente/…). A ficha vira uma cópia aqui: o que você mudar depois não volta para a CRIS.</p>
+    <input id="crisLink" placeholder="https://crisordemparanormal.com/agente/..." autocomplete="off">
+    <p class="muted small" id="crisMsg"></p>
+    <div class="row"><button id="crisGo" class="primary">Importar</button><button data-close>Cancelar</button></div>`);
+  const inp = w.querySelector("#crisLink"); const msg = w.querySelector("#crisMsg"); const go = w.querySelector("#crisGo");
+  inp.focus();
+  inp.addEventListener("keydown", (e) => { if (e.key === "Enter") go.click(); });
+  go.addEventListener("click", async () => {
+    const link = inp.value.trim();
+    if (!crisId(link)) { msg.textContent = "Esse link não parece ser de uma ficha da CRIS."; return; }
+    if (precisaPedir() && !consumeAllow()) { w.remove(); return pedirFicha(); }
+    go.disabled = true; msg.textContent = "Buscando na CRIS…";
+    try {
+      const { id, doc } = await buscarCris(link);
+      const { sheet, avisos, resumo } = crisParaFicha(doc, CRIS_CTX, link);
+      const s = upgrade(sheet); s.owner = { id: me.id, name: me.name }; s.updatedAt = Date.now(); s.lastExport = 0; s.cris = id;
+      store.own[s.id] = s; store.currentId = s.id; tab = "principal"; persist(); scheduleSync(s); w.remove(); render();
+      toast(`${s.header.personagem} importado da CRIS: ${resumo.pericias} perícias, ${resumo.itens} itens, ${resumo.ataques} ataques, ${resumo.rituais} rituais.${avisos.length ? " Veja os avisos nas Notas." : ""}`);
+    } catch (err) { go.disabled = false; msg.textContent = err.message || "Não deu para importar."; }
+  });
+}
+// Traz só os números que mudam na mesa (PV, PE/PD, SAN, NEX) da ficha original na CRIS
+async function crisAtualizar(s) {
+  if (!s?.cris) return;
+  toast("Buscando na CRIS…");
+  try {
+    const { doc } = await buscarCris(s.cris);
+    const { sheet: n } = crisParaFicha(doc, CRIS_CTX);
+    s.pv = n.pv; s.nex = n.nex; s.attrs = n.attrs;
+    if (n.regra === s.regra) { s.pd = n.pd; if (n.san) s.san = n.san; }
+    touchSheet(s); render(); toast(`${s.header.personagem}: PV ${s.pv.atual}/${s.pv.max} atualizado pela CRIS.`);
+  } catch (err) { toast(err.message || "Não deu para atualizar."); }
+}
+
 let toastTimer;
 function toast(text) {
   if (cur() && !isDet(cur())) text = trPE(text);
