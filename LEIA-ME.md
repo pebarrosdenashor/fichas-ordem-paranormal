@@ -93,3 +93,14 @@
 ## Observação
 
 A sincronização usa as mensagens da sala do Owlbear. A interface esconde as fichas dos outros jogadores, mas os dados passam pelo navegador de todos os participantes, então não é um sigilo à prova de quem souber abrir as ferramentas de desenvolvedor.
+
+## Novidades da versão 3.8 — efeitos na mesa
+Arquivos novos: `efeitos.js`, `efeito.html` e os selos `selo-sangue.svg`, `selo-morte.svg`, `selo-conhecimento.svg`, `selo-energia.svg`, `selo-medo.svg`. Suba todos junto com os outros.
+
+- **Visual por elemento:** rituais e itens amaldiçoados ganham a cor e o símbolo do elemento (na lista e no acesso rápido). Tema novo “Pela afinidade”, que muda sozinho com a afinidade. Cada tema tem um fundo animado (Sangue pulsa, Morte gira, Conhecimento sobe em pontos dourados, Energia faísca, Medo é névoa); desliga em ⋯.
+- **Rolagem dramática:** 20 natural (ou crítico na margem da arma) e 1 natural ganham efeito depois que os dados param: tela tremendo, “CRÍTICO!” ou “1 NATURAL” e som. A mesa toda vê o efeito por cima do mapa e ouve pela caixa de som do Escudo do Mestre. Rolagens secretas e ocultas não aparecem para ninguém.
+- **Conjurar ritual:** um selo do elemento se desenha na ficha de quem conjura, e o mesmo selo gira embaixo do token vinculado, para todos. Cada elemento tem o seu som.
+- **O mestre desliga:** na aba Mesa (mestre) ou no Escudo do Mestre → Ferramentas: “Animação ao conjurar ritual” e “Críticos na tela de todos”. Vale para a sala toda na hora.
+- Em ⋯, cada pessoa ainda escolhe: som, animações na própria ficha, ver os críticos dos outros e o fundo animado.
+
+> Os símbolos dos elementos foram desenhados para a extensão (não são os oficiais).

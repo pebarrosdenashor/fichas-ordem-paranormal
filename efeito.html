@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Efeito</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=Crimson+Pro:ital@0;1&display=swap" rel="stylesheet">
+  <style>html, body { margin: 0; height: 100%; background: transparent; overflow: hidden; }</style>
+</head>
+<body>
+  <script type="module">
+    import OBR from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+    import { mostrar } from "./efeitos.js?v=3.8.0";
+    /* Tela transparente por cima do mapa, aberta pelo fundo da ficha quando alguém tira crítico ou 1 natural. */
+    let d = {};
+    try { d = JSON.parse(decodeURIComponent(location.hash.replace(/^#d=/, ""))); } catch { /* */ }
+    const fechar = () => { if (OBR.isAvailable) OBR.modal.close("io.github.pebarrosdenashor.ficha-op/efeito").catch(() => {}); };
+    if (d.tipo) mostrar(d, { clicavel: false }).then(fechar); else fechar();
+    setTimeout(fechar, 6000); // garantia
+  </script>
+</body>
+</html>

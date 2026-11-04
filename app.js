@@ -1,5 +1,6 @@
 import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { buscarCris, crisParaFicha, crisId } from "./cris.js";
+import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.8.0";
+import * as FX from "./efeitos.js?v=3.8.0";
 
 /* =========================================================
    Ficha de Ordem Paranormal — extensão para Owlbear Rodeo
@@ -13,6 +14,9 @@ const LINK_KEY = NS + "/link";       // metadado gravado no token
 const OPEN_KEY = NS + ":open";       // pedido de "abrir ficha" vindo do menu do token
 const IS_MODAL = new URLSearchParams(location.search).has("modal");
 const QUICK_ID = new URLSearchParams(location.search).get("quick"); // janelinha de acesso rápido aberta pelo token
+const FX_CH = NS + "/fx";            // v3.8: efeitos para a mesa (crítico, 1 natural, selo do ritual)
+const CFG_KEY = NS + "/cfg";         // v3.8: na sala, o mestre liga/desliga os efeitos para todos
+const MESTRE_CH = "io.github.pebarrosdenashor.mestre-hx/msg"; // caixa de som do Escudo do Mestre
 
 /* ---------- Dados fixos do sistema ---------- */
 const ATTRS = [["FOR", "Força"], ["AGI", "Agilidade"], ["INT", "Intelecto"], ["VIG", "Vigor"], ["PRE", "Presença"]];
@@ -71,7 +75,9 @@ function patentePorPP(pp) { let r = "Recruta"; for (const [n, t] of Object.entri
 const CATS = [[0, "0"], [1, "I"], [2, "II"], [3, "III"], [4, "IV"]];
 const ITEM_LISTS = ["armas", "municoes", "protecoes", "gerais", "amaldicoados"];
 const CUSTO_CIRCULO = { 1: 1, 2: 3, 3: 6, 4: 10 };
-const TEMAS = ["Padrão", "Sangue", "Morte", "Conhecimento", "Energia", "Medo"];
+const TEMAS = [["Padrão", "Padrão"], ["Afinidade", "Pela afinidade (muda sozinho)"], ["Sangue", "Sangue"], ["Morte", "Morte"], ["Conhecimento", "Conhecimento"], ["Energia", "Energia"], ["Medo", "Medo"]];
+// v3.8: "Afinidade" usa o elemento da afinidade; sem afinidade, o padrão
+function temaEf(s) { const t = s?.header?.tema || "Padrão"; return t === "Afinidade" ? (ELEMENTOS.includes(s.header.afinidade) ? s.header.afinidade : "Padrão") : t; }
 const TRILHA_NEX = [10, 40, 65, 99];
 
 /* Condições: d = dados perdidos (todos / físicos FOR-AGI-VIG / mentais INT-PRE / ataques / perícia específica),
@@ -629,6 +635,7 @@ function announce(text, forceHidden = false) {
   const hidden = forceHidden || (isGM() && hiddenRolls);
   const secret = !isGM() && secretRoll && !forceHidden;
   trayText(text);
+  soltarDrama(hidden || secret);
   const id = addLog(text, me.name, hidden || secret);
   if (obrOk) {
     OBR.notification.show((hidden || secret ? "🙈 " : "") + text.split("\n")[0] + (secret ? " (só o mestre vê)" : ""));
@@ -641,7 +648,7 @@ function testLine(s, pericia, isAttack, extraBonus = 0, opts = {}) {
   const nDice = attrVal(s, attr) - dicePenalty(s, attr, pericia, isAttack);
   const m = opts.noMod ? { dados: 0, bonus: 0 } : takeNextMod();
   const r = rollTest(nDice + num(m.dados) + num(opts.dados)); const b = (p ? periciaTeste(s, pericia) : hexaPen(s)) + num(extraBonus) + num(m.bonus);
-  if (!opts.noAnim) diceAnim(r.dice, r.pick, r.worst);
+  if (!opts.noAnim) { diceAnim(r.dice, r.pick, r.worst); marcarDrama(r.pick, pericia); }
   return { ...r, bonus: b, total: r.pick + b, txt: `[${r.dice.join(", ")}]${r.worst ? " (pior)" : ""} → ${r.pick} ${fmt(b)} = ${r.pick + b}${modTxt(m)}${diceWhy(s, attr, pericia, isAttack, num(m.dados))}${opts.nota || ""}` };
 }
 function rollPericia(s, n) {
@@ -652,7 +659,7 @@ function rollPericia(s, n) {
 function rollAttr(s, a) {
   const m = takeNextMod();
   const r = rollTest(attrVal(s, a) - dicePenalty(s, a, null, false) + num(m.dados)); const hp = hexaPen(s) + num(m.bonus);
-  diceAnim(r.dice, r.pick, r.worst);
+  diceAnim(r.dice, r.pick, r.worst); marcarDrama(r.pick, `Teste de ${a}`);
   announce(`${s.header.personagem} — teste de ${a}${diceWhy(s, a, null, false, num(m.dados))}: [${r.dice.join(", ")}]${r.worst ? " (pior)" : ""} → ${r.pick}${hp ? ` ${fmt(hp)} = ${r.pick + hp}` : ""}${modTxt(m)}`);
 }
 function rollAttack(s, a) {
@@ -661,6 +668,8 @@ function rollAttack(s, a) {
   const t = testLine(s, a.pericia, true, a.bonus, semProf ? { dados: -2, nota: ` (sem proficiência em ${a.prof}: −2d)` } : {});
   const crit = t.pick >= clamp(num(a.critico) || 20, 1, 20);
   const mult = crit ? Math.max(1, num(a.mult) || 2) : 1;
+  if (crit) marcarDrama(20, `${a.nome || "Ataque"} · dano ×${mult}`, t.pick < 20 ? `margem ${t.pick}` : "");
+  else if (drama) drama.sub = a.nome || drama.sub;
   const d = rollExpr(a.dano, mult); const dmgGroups = [...d.groups];
   const attrB = a.attrDano ? attrVal(s, a.attrDano) : 0;
   let total = d.total + attrB;
@@ -726,6 +735,7 @@ function castRitual(s, path, versao, btn) {
   const expr = versao === "discente" ? r.dadosDiscente : versao === "verdadeiro" ? r.dadosVerdadeiro : r.dados;
   const d = rollExpr(expr || (versao !== "normal" ? r.dados : "")); if (d.groups.length) trayRoll(d.groups);
   const nome = versao === "normal" ? r.nome : `${r.nome} (${versao === "discente" ? "Discente" : "Verdadeiro"})`;
+  efeitoRitual(s, r.elemento, nome || "Ritual", `−${cost} ${resSig(s)}${d.ok ? ` · efeito ${d.total}` : ""}`);
   const res = r.resPericia && r.resPericia !== "—" ? ` · ${r.resPericia} DT ${num(s.rituais.dt)}${r.resEfeito && r.resEfeito !== "—" ? " " + r.resEfeito.toLowerCase() : ""}` : "";
   announce(`${s.header.personagem} conjurou ${nome || "ritual"} (−${cost} PD)${res}${d.ok ? `\nEfeito: ${d.total}  —  ${d.txt}` : ""}`);
   render();
@@ -777,9 +787,10 @@ function listHTML(key) {
   return `<div class="list" data-list="${key}">${arr.map((it, i) => {
     const p = `${base}.${i}`;
     const star = key === "rituais" && af && it.elemento === af ? `<span class="afin" title="Elemento da sua afinidade">★</span>` : "";
+    const elem = (key === "rituais" || key === "amaldicoados") && FX.EL_COR[it.elemento] ? it.elemento : "";
     const acts = sc.actions ? sc.actions(p, it) : "";
-    return `<details class="item ${star ? "is-afin" : ""}" data-id="${it.id}" data-idx="${i}" data-hay="${esc((sc.hay(it) || "").toLowerCase())}" ${sc.attrs ? sc.attrs(it) : ""} ${openCards.has(it.id) ? "open" : ""}>
-      <summary><span class="drag" draggable="true" data-drag="${key}|${i}" title="Arraste para reordenar">⋮⋮</span>${star}<span class="sum-name" data-calc="sumName|${p}"></span><span class="sum-info" data-calc="sumInfo|${p}|${key}"></span>${sc.quick ? sc.quick(p) : ""}${RAPIDO_KEYS.includes(key) ? `<button class="icon qk-tog ${isRapido(s, key, it.id) ? "on" : ""}" data-rapido="${key}|${it.id}" title="${isRapido(s, key, it.id) ? "Tirar do acesso rápido" : "Pôr no acesso rápido (até 4)"}">⚡</button>` : ""}${delBtn(p)}</summary>
+    return `<details class="item ${star ? "is-afin" : ""}" data-id="${it.id}" data-idx="${i}" data-hay="${esc((sc.hay(it) || "").toLowerCase())}" ${sc.attrs ? sc.attrs(it) : ""} ${elem ? `data-elem="${elem}" style="--elc:${FX.corDe(elem)}"` : ""} ${openCards.has(it.id) ? "open" : ""}>
+      <summary><span class="drag" draggable="true" data-drag="${key}|${i}" title="Arraste para reordenar">⋮⋮</span>${star}${elem ? `<span class="el-glifo" title="${esc(elem)}">${FX.glifo(elem, 18)}</span>` : ""}<span class="sum-name" data-calc="sumName|${p}"></span><span class="sum-info" data-calc="sumInfo|${p}|${key}"></span>${sc.quick ? sc.quick(p) : ""}${RAPIDO_KEYS.includes(key) ? `<button class="icon qk-tog ${isRapido(s, key, it.id) ? "on" : ""}" data-rapido="${key}|${it.id}" title="${isRapido(s, key, it.id) ? "Tirar do acesso rápido" : "Pôr no acesso rápido (até 4)"}">⚡</button>` : ""}${delBtn(p)}</summary>
       ${acts ? `<div class="actions">${acts}</div>` : ""}
       <div class="fields">${sc.fields.map((f) => fieldHTML(f, `${p}.${f.k}`, it[f.k])).join("")}</div></details>`;
   }).join("") || `<p class="muted">Nada adicionado ainda.</p>`}</div>
@@ -1104,7 +1115,8 @@ function tabMesa() {
   <section class="card"><h3>Teste em grupo</h3>
     <div class="row"><select id="grpPer">${opts}</select><button id="btnGrp">🎲 Rolar para todos</button></div>
     <label class="check" style="margin-top:6px"><input type="checkbox" id="grpHidden" checked> Resultado só para mim (oculto)</label>
-  </section>`;
+  </section>
+  ${isGM() && obrOk ? cfgMesaHTML() : ""}`;
 }
 function tabContent(s) {
   switch (tab) {
@@ -1183,14 +1195,15 @@ function quickHTML(s) {
       extra = `<span class="qk-vers">${num(it.custoDiscente) || it.descDiscente ? `<button data-cast="${path}|discente">Discente +${num(it.custoDiscente)}</button>` : ""}${num(it.custoVerdadeiro) || it.descVerdadeiro ? `<button data-cast="${path}|verdadeiro">Verdadeiro +${num(it.custoVerdadeiro)}</button>` : ""}</span>`;
     }
     const desc = resumo(it.desc) || sub;
-    return `<div class="qk-item qk-${k}">
-      <button class="qk-main" ${act}><span class="qk-title"><span class="qk-name">${esc(it.nome || "(sem nome)")}</span>${custo ? `<span class="qk-cost">${esc(custo)}</span>` : ""}</span>
+    const elq = k === "rituais" && FX.EL_COR[it.elemento] ? it.elemento : "";
+    return `<div class="qk-item qk-${k}" ${elq ? `data-elem="${elq}" style="--elc:${FX.corDe(elq)}"` : ""}>
+      <button class="qk-main" ${act}><span class="qk-title">${elq ? FX.glifo(elq, 16) : ""}<span class="qk-name">${esc(it.nome || "(sem nome)")}</span>${custo ? `<span class="qk-cost">${esc(custo)}</span>` : ""}</span>
       <span class="qk-desc">${esc(desc)}${desc !== sub && sub ? `<br><span class="qk-sub">${esc(sub)}</span>` : ""}</span></button>${extra}</div>`;
   }).join("")}</div>`;
 }
 function renderQuick() {
   const s = cur();
-  document.body.classList.add("quick-mode"); document.body.dataset.tema = s?.header.tema || "Padrão";
+  document.body.classList.add("quick-mode"); document.body.dataset.tema = temaEf(s);
   if (!s) { app.innerHTML = `<div class="qk-wrap"><p class="muted">Ficha não encontrada neste navegador.</p></div>`; return; }
   app.innerHTML = `<div class="qk-wrap"><div class="qk-head"><b>${esc(s.header.personagem)}</b><span>PV ${num(s.pv.atual)}/${num(s.pv.max)} · ${resSig(s)} ${num(s.pd.atual)}/${num(s.pd.max)}${isDet(s) ? "" : ` · SAN ${num(s.san.atual)}/${num(s.san.max)}`} · ${resSig(s)} na rodada ${num(s.pdRodada)}/${pdLimite(s)}</span></div>${quickHTML(s)}<p class="qk-last" id="qkLast"></p></div>`;
   commitBase(s);
@@ -1398,6 +1411,59 @@ function tabInterludio(s) {
     ${(s.buffs || []).length ? `<ul class="buffs">${s.buffs.map((b, i) => `<li><div><b>${esc(b.nome)}</b>${b.expr ? ` <span class="tag">${esc(b.expr)}</span>` : ""}<div class="muted small">${esc(b.desc)}</div></div>
       ${b.expr ? `<button class="primary" data-usebuff="${i}" title="Rola e soma na próxima rolagem">Usar</button>` : `<button data-usebuff="${i}">Usado</button>`}${delBtn(`buffs.${i}`)}</li>`).join("")}</ul>` : `<p class="muted">Nenhum. As ações de interlúdio aparecem aqui até serem usadas.</p>`}
   </section>`;
+}
+
+/* ---------- Efeitos para a mesa (v3.8) ---------- */
+let animOn = lsGet(NS + ":anim") !== "0";        // animações de crítico e ritual nesta ficha
+let fundoOn = lsGet(NS + ":fundo") !== "0";      // fundo animado do elemento
+let mesaCfg = { ritual: true, crit: true };     // o mestre liga/desliga para a sala toda
+let drama = null;
+// Guarda o crítico (20 natural) ou o 1 natural da rolagem que acabou de acontecer; o anúncio solta o efeito
+function marcarDrama(pick, sub, extra = "") {
+  if (pick === 20) drama = { tipo: "crit", sub, extra, at: Date.now() };
+  else if (pick === 1) drama = { tipo: "nat1", sub, extra, at: Date.now() };
+  else drama = null;
+}
+function soltarDrama(escondido) {
+  const d = drama; drama = null;
+  if (!d || Date.now() - d.at > 1500) return;
+  const s = cur(); const nome = s?.header?.personagem || me.name || "";
+  const el = ELEMENTOS.includes(temaEf(s)) ? temaEf(s) : "";
+  const info = { tipo: d.tipo, nome, sub: [d.sub, d.extra].filter(Boolean).join(" · "), titulo: d.tipo === "crit" ? "Crítico!" : "1 natural", cor: d.tipo === "crit" ? (el ? FX.corDe(el) : "#ffd36b") : "" };
+  // espera os dados pararem no prato, para dar suspense
+  setTimeout(() => {
+    if (animOn) FX.mostrar(info, { tremer: app });
+    if (somOn) FX.som(d.tipo);
+    if (escondido || !obrOk || mesaCfg.crit === false) return;
+    OBR.broadcast.sendMessage(FX_CH, { t: "drama", de: me.id, ...info }, { destination: "REMOTE" }).catch(() => {});
+    OBR.broadcast.sendMessage(MESTRE_CH, { kind: "som", k: d.tipo === "crit" ? "critico" : "falha" }, { destination: "REMOTE" }).catch(() => {});
+  }, 1050);
+}
+async function efeitoRitual(s, el, nome, sub) {
+  el = FX.EL_COR[el] ? el : "Conhecimento";
+  const escondido = (isGM() && hiddenRolls) || (!isGM() && secretRoll);
+  if (somOn) FX.som("ritual", el);
+  if (mesaCfg.ritual === false) return;
+  if (animOn) FX.mostrar({ tipo: "ritual", el, nome: s.header.personagem, titulo: nome, sub });
+  if (!obrOk || escondido) return;
+  OBR.broadcast.sendMessage(MESTRE_CH, { kind: "som", k: `ritual-${el}` }, { destination: "REMOTE" }).catch(() => {});
+  // selo embaixo do token de quem conjurou, visto por todos
+  if (!sceneOk) return;
+  try {
+    const tokens = (await OBR.scene.items.getItems((it) => it.metadata?.[LINK_KEY]?.sheetId === s.id)).map((i) => i.id).slice(0, 3);
+    if (tokens.length) OBR.broadcast.sendMessage(FX_CH, { t: "selo", el, tokens }, { destination: "ALL" }).catch(() => {});
+  } catch { /* sem cena */ }
+}
+function cfgMesaHTML() {
+  return `<section class="card"><h3>Efeitos na mesa</h3>
+    <label class="check"><input type="checkbox" id="cfgRitual" ${mesaCfg.ritual !== false ? "checked" : ""}> Animação ao conjurar ritual (na ficha de quem conjura e o selo embaixo do token)</label>
+    <label class="check"><input type="checkbox" id="cfgCrit" ${mesaCfg.crit !== false ? "checked" : ""}> Críticos e 1 natural aparecem na tela de todos</label>
+    <p class="muted small">Vale para a sala toda, na hora. Rolagens secretas e ocultas nunca aparecem para os outros.</p></section>`;
+}
+async function salvarCfg(patch) {
+  mesaCfg = { ...mesaCfg, ...patch };
+  if (!obrOk) return;
+  try { await OBR.room.setMetadata({ [CFG_KEY]: mesaCfg }); } catch { toast("Não deu para salvar na sala."); }
 }
 
 /* ---------- Animação e som ---------- */
@@ -1950,7 +2016,8 @@ function render() {
   const s = cur();
   if (!tabsFor().some(([k]) => k === tab)) tab = "principal";
   const scroll = window.scrollY;
-  document.body.dataset.tema = s?.header.tema || "Padrão";
+  document.body.dataset.tema = temaEf(s);
+  document.body.classList.toggle("sem-fundo", !fundoOn);
 
   const opts = (list) => list.map(({ s: x }) => `<option value="${x.id}" ${x.id === store.currentId ? "selected" : ""}>${esc(x.header.personagem || "(sem nome)")}${isGM() && x.owner?.name ? " — " + esc(x.owner.name) : ""}</option>`).join("");
   const own = vis.filter((v) => v.own), others = vis.filter((v) => !v.own);
@@ -2026,6 +2093,8 @@ app.addEventListener("input", (e) => {
 app.addEventListener("change", (e) => {
   const el = e.target;
   if (el.id === "sheetSel") { store.currentId = el.value; persist(); render(); return; }
+  if (el.id === "cfgRitual") { salvarCfg({ ritual: el.checked }); return; }
+  if (el.id === "cfgCrit") { salvarCfg({ crit: el.checked }); return; }
   if (el.dataset.min != null) el.value = clamp(num(el.value), Number(el.dataset.min), Number(el.dataset.max));
   if (el.dataset.rerender) render();
 });
@@ -2301,7 +2370,10 @@ function menuDialog() {
     ${isGM() ? `<button id="mFull">Baixar backup completo (todas as fichas, com imagens)</button>` : ""}
     <button id="mLib">📚 Biblioteca do livro</button>
     <button id="mDice">🎲 Aparência dos dados e do prato</button>
-    <label class="check"><input type="checkbox" id="mSom" ${somOn ? "checked" : ""}> Som dos dados</label>
+    <label class="check"><input type="checkbox" id="mSom" ${somOn ? "checked" : ""}> Som dos dados e dos efeitos</label>
+    <label class="check"><input type="checkbox" id="mAnim" ${animOn ? "checked" : ""}> Animações de crítico e ritual na minha ficha</label>
+    ${obrOk ? `<label class="check"><input type="checkbox" id="mFxOutros" ${lsGet(NS + ":fxOutros") !== "0" ? "checked" : ""}> Ver na minha tela os críticos dos outros</label>` : ""}
+    <label class="check"><input type="checkbox" id="mFundo" ${fundoOn ? "checked" : ""}> Fundo animado do elemento (tema da ficha)</label>
     ${isGM() ? `<button id="mSync">Pedir fichas aos jogadores conectados</button>` : ""}
     ${s ? `<button id="mDup">Duplicar esta ficha</button><button id="mDel" class="danger">Apagar esta ficha</button>` : ""}
     <button data-close>Fechar</button>`);
@@ -2316,6 +2388,9 @@ function menuDialog() {
   w.querySelector("#mDice").addEventListener("click", () => { w.remove(); diceDialog(); });
   w.querySelector("#mLib").addEventListener("click", () => { w.remove(); libMenuDialog(); });
   w.querySelector("#mSom").addEventListener("change", (e) => { somOn = e.target.checked; lsSet(NS + ":som", somOn ? "1" : "0"); });
+  w.querySelector("#mAnim").addEventListener("change", (e) => { animOn = e.target.checked; lsSet(NS + ":anim", animOn ? "1" : "0"); });
+  w.querySelector("#mFxOutros")?.addEventListener("change", (e) => lsSet(NS + ":fxOutros", e.target.checked ? "1" : "0"));
+  w.querySelector("#mFundo").addEventListener("change", (e) => { fundoOn = e.target.checked; lsSet(NS + ":fundo", fundoOn ? "1" : "0"); document.body.classList.toggle("sem-fundo", !fundoOn); });
   w.querySelector("#mSync")?.addEventListener("click", () => { send({ t: "request" }); toast("Pedido enviado."); w.remove(); });
   w.querySelector("#mDup")?.addEventListener("click", () => {
     w.remove(); if (precisaPedir() && !consumeAllow()) return pedirFicha();
@@ -2444,6 +2519,8 @@ async function start() {
       obrOk = true;
       storeKey = `${NS}:${OBR.room.id}`;
       [role, me.id, me.name] = await Promise.all([OBR.player.getRole(), OBR.player.getId(), OBR.player.getName()]);
+      try { mesaCfg = { ...mesaCfg, ...((await OBR.room.getMetadata())[CFG_KEY] || {}) }; } catch { /* */ }
+      OBR.room.onMetadataChange((md) => { if (md[CFG_KEY]) { mesaCfg = { ...mesaCfg, ...md[CFG_KEY] }; if (tab === "mesa") softRender(); } });
       load(); render(); checkOpenRequest();
       if (!isGM() && readLs(allowKey(), { ok: [] }).ok.length) toast("O mestre aceitou seu pedido: clique em ＋ para criar a nova ficha.");
       OBR.broadcast.onMessage(CHANNEL, (ev) => onChunk(ev.data));

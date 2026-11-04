@@ -1,15 +1,20 @@
-import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
+import OBR, { buildShape, buildText, buildImage } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
 
 /* Roda em segundo plano enquanto a sala está aberta:
    - menu de clique direito nos tokens (abrir / vincular / desvincular ficha)
    - desenha as barras de PV e Determinação embaixo dos tokens vinculados
-   - põe o botão de acesso rápido (≡) ao lado dos tokens do próprio jogador */
+   - põe o botão de acesso rápido (≡) ao lado dos tokens do próprio jogador
+   - v3.8: mostra o crítico / 1 natural dos outros por cima do mapa e o selo do ritual embaixo do token */
 
 const NS = "io.github.pebarrosdenashor.ficha-op";
 const LINK_KEY = NS + "/link";
 const OPEN_KEY = NS + ":open";
 const ICON = new URL("icon.svg", location.href).href;
 const CHANNEL = NS + "/sync";
+const FX_CH = NS + "/fx";
+const CFG_KEY = NS + "/cfg";
+const FX_MODAL = NS + "/efeito";
+let mesaCfg = { ritual: true, crit: true };
 
 let role = "PLAYER", myId = "", storeKey = "";
 const drawn = new Map(); // tokenId -> assinatura do que foi desenhado
@@ -177,7 +182,7 @@ async function schedule(items) {
 async function startScene() {
   drawn.clear(); qDrawn.clear();
   try {
-    const old = await OBR.scene.local.getItems((i) => /-op-(pv|pd|q)/.test(i.id));
+    const old = await OBR.scene.local.getItems((i) => /-op-(pv|pd|q|selo)/.test(i.id));
     if (old.length) await OBR.scene.local.deleteItems(old.map((i) => i.id));
   } catch { /* */ }
   schedule(await OBR.scene.items.getItems());
@@ -247,8 +252,57 @@ function onChunk(data) {
   for (const [k, v] of Object.entries(partial)) if (Date.now() - v.at > 60000) delete partial[k];
 }
 
+/* ---------- Efeitos para a mesa (v3.8) ---------- */
+let efeitoAberto = 0;
+async function mostrarEfeito(d) {
+  if (mesaCfg.crit === false) return;
+  try { if (localStorage.getItem(NS + ":fxOutros") === "0") return; } catch { /* */ }
+  if (Date.now() - efeitoAberto < 2500) return; // um de cada vez
+  efeitoAberto = Date.now();
+  const dados = { tipo: d.tipo === "nat1" ? "nat1" : "crit", nome: String(d.nome || "").slice(0, 60), sub: String(d.sub || "").slice(0, 80), titulo: String(d.titulo || "").slice(0, 20), cor: /^#[0-9a-f]{3,8}$/i.test(d.cor || "") ? d.cor : "" };
+  try {
+    await OBR.modal.open({ id: FX_MODAL, url: new URL("efeito.html?v=3.8.0", location.href).href + "#d=" + encodeURIComponent(JSON.stringify(dados)), fullScreen: true, hideBackdrop: true, hidePaper: true, disablePointerEvents: true });
+  } catch { /* */ }
+}
+const SELO_EL = ["Sangue", "Morte", "Conhecimento", "Energia", "Medo"];
+async function desenharSelo(d) {
+  if (mesaCfg.ritual === false || !SELO_EL.includes(d.el) || !Array.isArray(d.tokens)) return;
+  try {
+    if (!(await OBR.scene.isReady())) return;
+    const dpi = await OBR.scene.grid.getDpi();
+    const url = new URL(`selo-${d.el.toLowerCase()}.svg`, location.href).href;
+    for (const tokenId of d.tokens.slice(0, 3)) {
+      let b; try { b = await OBR.scene.items.getItemBounds([String(tokenId)]); } catch { continue; }
+      const alvo = (Math.max(b.width, b.height) * 2.4) / dpi; // tamanho do selo, em células (a imagem tem 1 célula)
+      const id = `${tokenId}-op-selo-${Date.now().toString(36)}`;
+      const centro = { x: (b.min.x + b.max.x) / 2, y: (b.min.y + b.max.y) / 2 };
+      const item = buildImage({ url, mime: "image/svg+xml", width: 512, height: 512 }, { dpi: 512, offset: { x: 256, y: 256 } })
+        .id(id).position(centro).scale({ x: alvo * 0.3, y: alvo * 0.3 }).rotation(0).layer("PROP").locked(true).disableHit(true).name("Selo do ritual").build();
+      await OBR.scene.local.addItems([item]);
+      animarSelo(id, alvo);
+    }
+  } catch (e) { console.warn("Ficha OP: selo do ritual", e); }
+}
+async function animarSelo(id, alvo) {
+  const passos = 28, dur = 2800;
+  for (let i = 1; i <= passos; i++) {
+    await new Promise((r) => setTimeout(r, dur / passos));
+    const t = i / passos;
+    const k = t < 0.25 ? 0.3 + 0.7 * (1 - Math.pow(1 - t / 0.25, 3)) : t > 0.8 ? 1 - (t - 0.8) * 2.5 : 1; // cresce, fica, encolhe
+    try { await OBR.scene.local.updateItems([id], (ds) => { for (const x of ds) { x.scale = { x: alvo * k, y: alvo * k }; x.rotation = t * 75; } }); } catch { return; }
+  }
+  try { await OBR.scene.local.deleteItems([id]); } catch { /* */ }
+}
+
 OBR.onReady(async () => {
   storeKey = `${NS}:${OBR.room.id}`;
+  try { mesaCfg = { ...mesaCfg, ...((await OBR.room.getMetadata())[CFG_KEY] || {}) }; } catch { /* */ }
+  OBR.room.onMetadataChange((md) => { if (md[CFG_KEY]) mesaCfg = { ...mesaCfg, ...md[CFG_KEY] }; });
+  OBR.broadcast.onMessage(FX_CH, (ev) => {
+    const d = ev.data || {};
+    if (d.t === "drama" && d.de !== myId) mostrarEfeito(d);
+    if (d.t === "selo") desenharSelo(d);
+  });
   OBR.broadcast.onMessage(CHANNEL, (ev) => onChunk(ev.data));
   [role, myId] = await Promise.all([OBR.player.getRole(), OBR.player.getId()]);
   setupMenus();
