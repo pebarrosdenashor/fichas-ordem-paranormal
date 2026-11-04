@@ -1,6 +1,6 @@
 import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.9.0";
-import * as FX from "./efeitos.js?v=3.9.0";
+import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.9.1";
+import * as FX from "./efeitos.js?v=3.9.1";
 
 /* =========================================================
    Ficha de Ordem Paranormal — extensão para Owlbear Rodeo
@@ -2053,7 +2053,11 @@ function aplicarTrilha(s, t, de, ate, trocar = false) {
 }
 function trilhaDialog(s) {
   if (!s) return;
-  if (!libLoad()?.itens?.length) return libDialog("habilidades");
+  if (!libLoad()?.itens?.length) {
+    return dialog(`<h3>Escolher trilha</h3><p>Este navegador ainda não tem nenhuma biblioteca dos livros, então não há trilhas para escolher.</p>
+      <p class="muted">${isGM() ? "Importe os arquivos de biblioteca em ⋯ → Biblioteca do livro e depois use “Enviar a biblioteca para os jogadores da sala”." : "Peça ao mestre para enviar a biblioteca pela sala (no menu ⋯ → Biblioteca do livro dele), com você conectado. Ou importe o arquivo em ⋯ → Biblioteca do livro."}</p>
+      <p class="muted small">Enquanto isso, dá para digitar o nome da trilha no campo.</p><button data-close>Fechar</button>`);
+  }
   const atual = trilhaAtual(s); const nex = num(s.nex);
   const w = dialog(`<h3>Escolher trilha</h3>
     <p class="muted small">As trilhas vêm das bibliotecas carregadas (${Object.values(libLoad().livros || {}).map(esc).join(", ")}). Ao escolher, entram na aba Habilidades as habilidades da trilha até o NEX atual (${nex}%), e as próximas entram quando o NEX subir.${atual ? " Trocar de trilha remove as habilidades que a trilha anterior adicionou." : ""}</p>
@@ -2205,7 +2209,11 @@ app.addEventListener("change", (e) => {
   if (el.id === "cfgRitual") { salvarCfg({ ritual: el.checked }); return; }
   if (el.id === "cfgCrit") { salvarCfg({ crit: el.checked }); return; }
   if (el.dataset.min != null) el.value = clamp(num(el.value), Number(el.dataset.min), Number(el.dataset.max));
-  if (el.dataset.rerender) render();
+  if (el.dataset.rerender) {
+    // Campo de texto: o "change" dispara quando o campo perde o foco, muitas vezes porque a pessoa clicou num botão.
+    // Redesenhar na hora troca o botão e o clique se perde; por isso o redesenho espera o clique terminar.
+    if (el.tagName === "INPUT" && el.type === "text") setTimeout(render, 250); else render();
+  }
 });
 app.addEventListener("toggle", (e) => {
   const d = e.target; if (!d.matches?.("details.item")) return;

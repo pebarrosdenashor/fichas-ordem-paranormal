@@ -113,3 +113,7 @@ Arquivos novos: `efeitos.js`, `efeito.html` e os selos `selo-sangue.svg`, `selo-
 - **📚 Adicionar do livro:** a lista não para mais em 120 entradas (era isso que cortava as habilidades do livro básico) e mostra quantas entradas há.
 
 Arquivos para trocar: `app.js`, `style.css`, `index.html`, `manifest.json` e este `LEIA-ME.md`.
+
+### 3.9.1
+- O botão **📚 Escolher** da trilha não perde mais o clique quando o nome da trilha acabou de ser digitado no campo ao lado (vale para os outros campos de texto que redesenham a ficha).
+- Sem biblioteca no navegador, o botão explica como receber a do mestre.
