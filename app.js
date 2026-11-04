@@ -1,6 +1,6 @@
 import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.8.0";
-import * as FX from "./efeitos.js?v=3.8.0";
+import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.9.0";
+import * as FX from "./efeitos.js?v=3.9.0";
 
 /* =========================================================
    Ficha de Ordem Paranormal — extensão para Owlbear Rodeo
@@ -273,7 +273,7 @@ function newSheet() {
   for (const [n, a] of PERICIAS) per[n] = { attr: a, treino: 0, outros: 0 };
   return {
     id: uid(), owner: { id: me.id, name: me.name }, updatedAt: Date.now(), lastExport: 0,
-    header: { img: "", personagem: "Novo agente", jogador: me.name || "", origem: "", classe: "Combatente", trilha: "", afinidade: "", tema: "Padrão" },
+    header: { img: "", personagem: "Novo agente", jogador: me.name || "", origem: "", classe: "Combatente", trilha: "", trilhaKey: "", afinidade: "", tema: "Padrão" },
     trilhaHab: { 10: "", 40: "", 65: "", 99: "" },
     attrs: { FOR: 1, AGI: 1, INT: 1, VIG: 1, PRE: 1 },
     nex: 5, pdBonus: 0, pdRodada: 0, desloc: 9,
@@ -933,9 +933,10 @@ function tabPrincipal(s) {
   <section class="card">
     <h3>Trilha e afinidade</h3>
     <div class="grid2">
-      <label>Trilha ${inp("header.trilha", s.header.trilha, "text", 'placeholder="Ex.: Aniquilador"')}</label>
+      <label>Trilha <span class="row">${inp("header.trilha", s.header.trilha, "text", 'placeholder="Ex.: Aniquilador" data-rerender="1"')}<button class="small" data-trilha="1" title="Escolher entre as trilhas dos livros carregados">📚 Escolher</button></span></label>
       <label>Afinidade ${nex >= 50 ? sel("header.afinidade", s.header.afinidade, [["", "—"], ...ELEMENTOS], 'data-rerender="1"') : `<span class="muted" style="text-transform:none">Liberada com NEX 50%</span>`}</label>
-      ${TRILHA_NEX.map((n) => `<label class="wide ${nex >= n ? "reached" : "locked"}">Habilidade de trilha — NEX ${n}% ${nex >= n ? "✓" : "🔒"} ${ta(`trilhaHab.${n}`, s.trilhaHab[n], 2)}</label>`).join("")}
+      ${trilhaAviso(s)}
+      ${TRILHA_NEX.map((n) => { const prox = trilhaAtual(s)?.habs.find((it) => num(it.nex) === n); return `<label class="wide ${nex >= n ? "reached" : "locked"}">Habilidade de trilha — NEX ${n}% ${nex >= n ? "✓" : "🔒"} <textarea data-path="trilhaHab.${n}" rows="2" ${prox && !s.trilhaHab[n] ? `placeholder="${esc(`${nex >= n ? "" : "Próxima: "}${prox.nome}`)}"` : ""}>${esc(s.trilhaHab[n])}</textarea></label>`; }).join("")}
     </div>
   </section>
 
@@ -1781,6 +1782,14 @@ const NEX_CLASSE = {
 };
 const GRAU_BASE = { Combatente: 2, Especialista: 5, Ocultista: 3 }; // perícias no grau de treinamento = base + Int
 const lvlOf = (n) => (num(n) >= 99 ? 20 : Math.max(1, Math.round(num(n) / 5)));
+function trilhaAviso(s) {
+  const t = trilhaAtual(s); const nex = num(s.nex);
+  if (!libLoad()?.itens?.length) return "";
+  if (!s.header.trilha) return nex >= 10 ? `<p class="wide warn small">Sem trilha escolhida. Use 📚 Escolher para pegar uma trilha dos livros.</p>` : "";
+  if (!t) return `<p class="wide muted small">Trilha “${esc(s.header.trilha)}” não está nas bibliotecas carregadas: as habilidades ficam por sua conta.</p>`;
+  const falta = faltandoTrilha(s, t, -1, nex);
+  return `<p class="wide muted small">Trilha do livro: ${esc(t.livro)}${t.classe ? ` · ${esc(t.classe)}` : ""}.</p>${falta.length ? `<p class="wide warn small">Faltam na aba Habilidades: ${falta.map((it) => `${esc(it.nome)} (NEX ${num(it.nex)}%)`).join(", ")}. <button class="small" data-trilhaok="1">Adicionar</button></p>` : ""}`;
+}
 function nexDialog(s, de, para) {
   const dl = lvlOf(para) - lvlOf(de); if (dl <= 0) return;
   const st = CLASSE_STATS[s.header.classe] || CLASSE_STATS.Combatente;
@@ -1790,6 +1799,13 @@ function nexDialog(s, de, para) {
   const limDe = Math.round(num(de) / 5), limPara = Math.round(num(para) / 5);
   const trilhas = TRILHA_NEX.filter((n) => de < n && para >= n);
   const cls = s.header.classe;
+  const tAt = trilhaAtual(s); const novas = faltandoTrilha(s, tAt, de, para);
+  const temLib = !!libLoad()?.itens?.length;
+  const trilhaLi = novas.length
+    ? `<li data-keep><label class="check"><input type="checkbox" id="nxTr" checked> <span><b>Trilha ${esc(tAt.nome)}:</b> adicionar ${novas.map((it) => `<b>${esc(it.nome)}</b> (NEX ${num(it.nex)}%)`).join(", ")} na aba Habilidades</span></label></li>`
+    : !s.header.trilha && trilhas.length && temLib
+      ? `<li><b>Trilha:</b> ainda não escolhida. <button class="small" id="nxTrEsc">📚 Escolher trilha</button></li>`
+      : !tAt ? trilhas.map((n) => `<li><b>Habilidade de trilha (NEX ${n}%):</b> anote na aba Principal, em “Trilha e afinidade”.</li>`).join("") : "";
   const lembra = [...NEX_LEMBRETES, ...(NEX_CLASSE[cls] || [])].filter(([n]) => de < n && para >= n).sort((x, y) => x[0] - y[0])
     .map(([n, t]) => [n, t === "poder de classe" ? `poder de ${String(cls || "classe").toLowerCase()}` : t === "grau de treinamento" && GRAU_BASE[cls] ? `grau de treinamento em ${GRAU_BASE[cls] + attrVal(s, "INT")} perícias (${GRAU_BASE[cls]} + Int)` : t]);
   if (cls === "Ocultista") lembra.push([para, `aprenda ${dl} ritual(is) de um círculo que possa lançar`]);
@@ -1799,12 +1815,16 @@ function nexDialog(s, de, para) {
       <li><b>Determinação máxima:</b> ${s.pd.max} → <b>${num(s.pd.max) + dPD}</b> <span class="muted">(+${dPD}: ${rr[1]} da classe + ${pre} de Presença por nível)</span></li>
       ${dSAN ? `<li data-keep><b>Sanidade máxima:</b> ${s.san.max} → <b>${num(s.san.max) + dSAN}</b> <span class="muted">(+${dSAN}: ${st.san[1]} da classe por nível)</span></li>` : ""}
       <li><b>Limite de PD por rodada:</b> ${limDe} → <b>${limPara}</b> <span class="muted">(automático)</span></li>
-      ${trilhas.map((n) => `<li><b>Habilidade de trilha (NEX ${n}%):</b> anote na aba Principal, em “Trilha e afinidade”.</li>`).join("")}
+      ${trilhaLi}
       ${lembra.length ? `<li class="muted">Lembretes (confira no livro): ${lembra.map(([n, t]) => `${n}% — ${t}`).join("; ")}.</li>` : ""}
     </ul>
     <p class="muted small">Aplicar soma os aumentos aos PV e à Determinação, máximos e atuais.</p>
-    <div class="row"><button class="primary" id="nxGo">Aplicar</button><button data-close>Só mudar o NEX</button></div>`);
+    <div class="row"><button class="primary" id="nxGo">Aplicar</button><button id="nxSkip">Só mudar o NEX</button></div>`);
+  const addTrilha = () => { if (novas.length && w.querySelector("#nxTr")?.checked) { const n = aplicarTrilha(s, tAt, de, para); if (n) toast(`${n} habilidade(s) da trilha ${tAt.nome} adicionada(s) na aba Habilidades.`); return n; } return 0; };
+  w.querySelector("#nxSkip").addEventListener("click", () => { if (addTrilha()) { touchSheet(s); render(); } w.remove(); });
+  w.querySelector("#nxTrEsc")?.addEventListener("click", () => trilhaDialog(s));
   w.querySelector("#nxGo").addEventListener("click", () => {
+    addTrilha();
     s.pv.max = num(s.pv.max) + dPV; s.pv.atual = num(s.pv.atual) + dPV; s.pd.max = num(s.pd.max) + dPD; s.pd.atual = num(s.pd.atual) + dPD;
     if (dSAN) { s.san.max = num(s.san.max) + dSAN; s.san.atual = num(s.san.atual) + dSAN; }
     touchSheet(s); w.remove(); render(); announce(`${s.header.personagem} chegou a NEX ${para}%: +${dPV} PV e +${dPD} PD máximos.`);
@@ -1897,6 +1917,7 @@ function libDialog(modo) {
     <div class="row"><input id="lbQ" placeholder="🔍 Buscar por nome ou texto…"><select id="lbG"><option value="">Tudo</option>${grupos.map((g) => `<option>${esc(g)}</option>`).join("")}</select></div>
     ${itemLista && !lib.itens.some((i) => i.tipo === "item" && i.lista === itemLista) ? `<p class="muted">Nenhum item desta lista nas bibliotecas carregadas. Importe as bibliotecas novas (com itens) no menu ⋯ → Biblioteca do livro.</p>` : ""}
     ${!itemLista && modo !== "rituais" ? `<label class="check"><input type="checkbox" id="lbCls" checked> Só da classe ${esc(s.header.classe)} (e gerais)</label>` : ""}
+    <p class="muted small" id="lbCount"></p>
     <div class="lb-list" id="lbList"></div><button data-close>Fechar</button>`);
   w.querySelector(".box").classList.add("lb-box");
   const draw = () => {
@@ -1904,7 +1925,8 @@ function libDialog(modo) {
     const list = lib.itens.map((it, i) => ({ it, i })).filter(({ it }) => tipos.includes(it.tipo) && okItem(it)
       && (!g || (it.tipo === "trilha" ? `Trilha: ${it.grupo}` : it.grupo) === g)
       && (!cls || !it.classe || it.classe === s.header.classe)
-      && (!q || (it.nome + " " + it.desc).toLowerCase().includes(q))).slice(0, 120);
+      && (!q || (it.nome + " " + it.desc).toLowerCase().includes(q)));
+    w.querySelector("#lbCount").textContent = `${list.length} entrada(s)`;
     w.querySelector("#lbList").innerHTML = list.length ? list.map(({ it, i }) => `<details class="lb-item"><summary><b>${esc(it.nome)}</b> <span class="muted small">${esc(it.tipo === "trilha" ? `Trilha ${it.grupo}, NEX ${it.nex}%` : it.tipo === "ritual" ? `${it.elemento || ""} ${it.circulo || ""}º` : it.tipo === "item" ? itemResumo(it) : it.grupo)} · ${esc(it.fonte)}</span>
         <button class="primary icon" data-libadd="${i}">+ Adicionar</button></summary>
         ${it.prereq ? `<p class="muted small"><b>Pré-requisito:</b> ${esc(it.prereq)}</p>` : ""}${it.pericias ? `<p class="muted small"><b>Perícias treinadas:</b> ${esc(it.pericias)}</p>` : ""}${it.poder ? `<p class="muted small"><b>Poder:</b> ${esc(it.poder)}</p>` : ""}
@@ -1973,15 +1995,102 @@ function libAdd(it) {
     });
     s.rituais.lista.push(r); openCards.add(r.id);
   } else {
-    const h = newItem(SCHEMAS.habilidades);
-    const titulo = it.tipo === "origem" ? `${it.nome} — ${it.poder || "poder de origem"}` : it.nome;
-    const pre = [it.tipo === "trilha" ? `Trilha ${it.grupo}, NEX ${it.nex}%` : it.grupo, it.prereq ? `Pré-requisito: ${it.prereq}` : "", it.pericias ? `Perícias treinadas: ${it.pericias}` : ""].filter(Boolean).join(" · ");
-    Object.assign(h, { nome: titulo, custo: custo, desc: `${pre}\n\n${it.desc}\n(${it.fonte})` });
+    const h = habDeLib(it);
     s.habilidades.push(h); openCards.add(h.id);
-    if (it.tipo === "trilha") { if (!s.header.trilha) s.header.trilha = it.grupo; if (TRILHA_NEX.includes(it.nex) && !s.trilhaHab[it.nex]) s.trilhaHab[it.nex] = `${it.nome}: ${it.desc}`; }
+    if (it.tipo === "trilha") {
+      if (!s.header.trilha) { s.header.trilha = it.grupo; s.header.trilhaKey = trilhaKeyDe(it); }
+      if (TRILHA_NEX.includes(num(it.nex)) && !s.trilhaHab[num(it.nex)]) s.trilhaHab[num(it.nex)] = `${it.nome}: ${it.desc}`;
+      if (s.header.trilhaKey === trilhaKeyDe(it)) h.trilhaRef = `${trilhaKeyDe(it)}|${it.nome}`;
+    }
     if (it.tipo === "origem" && !s.header.origem) s.header.origem = it.nome;
   }
   touch(); render();
+}
+/* ---------- Trilhas pela biblioteca (v3.9) ---------- */
+const normTxt = (t) => String(t || "").normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().trim();
+function livroDe(it) { const lib = libLoad(); const k = Object.keys(lib?.livros || {}).find((l) => String(it.fonte || "").startsWith(l + " ")); return k ? { k, nome: lib.livros[k] } : { k: "", nome: "" }; }
+const trilhaKeyDe = (it) => `${it.grupo}|${livroDe(it).k}`;
+function habDeLib(it) {
+  const h = newItem(SCHEMAS.habilidades);
+  const titulo = it.tipo === "origem" ? `${it.nome} — ${it.poder || "poder de origem"}` : it.nome;
+  const pre = [it.tipo === "trilha" ? `Trilha ${it.grupo}, NEX ${it.nex}%` : it.grupo, it.prereq ? `Pré-requisito: ${it.prereq}` : "", it.pericias ? `Perícias treinadas: ${it.pericias}` : ""].filter(Boolean).join(" · ");
+  Object.assign(h, { nome: titulo, custo: num((String(it.desc).match(/(\d+)\s*PE\b/) || [])[1]), desc: `${pre}\n\n${it.desc}\n(${it.fonte})` });
+  return h;
+}
+// Todas as trilhas das bibliotecas carregadas (de qualquer livro), com as habilidades em ordem de NEX
+function trilhasLib(classe) {
+  const lib = libLoad(); if (!lib?.itens?.length) return [];
+  const m = new Map();
+  for (const it of lib.itens) {
+    if (it.tipo !== "trilha" || !it.grupo) continue;
+    if (classe && it.classe && it.classe !== classe) continue;
+    const key = trilhaKeyDe(it);
+    if (!m.has(key)) m.set(key, { key, nome: it.grupo, classe: it.classe || "", livro: livroDe(it).nome || String(it.fonte || "").replace(/\s*p\.?\s*\d.*$/i, ""), habs: [] });
+    m.get(key).habs.push(it);
+  }
+  const arr = [...m.values()];
+  arr.forEach((t) => t.habs.sort((a, b) => num(a.nex) - num(b.nex)));
+  return arr.sort((a, b) => a.nome.localeCompare(b.nome, "pt") || a.livro.localeCompare(b.livro, "pt"));
+}
+function trilhaAtual(s) {
+  if (!s?.header?.trilha) return null;
+  const ts = trilhasLib(null);
+  return ts.find((t) => t.key === s.header.trilhaKey && t.nome === s.header.trilha)
+    || ts.find((t) => normTxt(t.nome) === normTxt(s.header.trilha) && (!t.classe || t.classe === s.header.classe))
+    || ts.find((t) => normTxt(t.nome) === normTxt(s.header.trilha)) || null;
+}
+const temHabTrilha = (s, t, it) => s.habilidades.some((h) => h.trilhaRef === `${t.key}|${it.nome}` || normTxt(h.nome) === normTxt(it.nome));
+// Habilidades da trilha com NEX em (de, ate] que ainda não estão na ficha
+const faltandoTrilha = (s, t, de, ate) => (t ? t.habs.filter((it) => num(it.nex) > de && num(it.nex) <= ate && !temHabTrilha(s, t, it)) : []);
+function aplicarTrilha(s, t, de, ate, trocar = false) {
+  let n = 0;
+  for (const it of t.habs) {
+    const nx = num(it.nex); if (nx <= de || nx > ate) continue;
+    if (TRILHA_NEX.includes(nx) && (trocar || !s.trilhaHab[nx])) s.trilhaHab[nx] = `${it.nome}: ${it.desc}`;
+    if (!temHabTrilha(s, t, it)) { const h = habDeLib(it); h.trilhaRef = `${t.key}|${it.nome}`; s.habilidades.push(h); n++; }
+  }
+  return n;
+}
+function trilhaDialog(s) {
+  if (!s) return;
+  if (!libLoad()?.itens?.length) return libDialog("habilidades");
+  const atual = trilhaAtual(s); const nex = num(s.nex);
+  const w = dialog(`<h3>Escolher trilha</h3>
+    <p class="muted small">As trilhas vêm das bibliotecas carregadas (${Object.values(libLoad().livros || {}).map(esc).join(", ")}). Ao escolher, entram na aba Habilidades as habilidades da trilha até o NEX atual (${nex}%), e as próximas entram quando o NEX subir.${atual ? " Trocar de trilha remove as habilidades que a trilha anterior adicionou." : ""}</p>
+    <label class="check"><input type="checkbox" id="trCls" checked> Só da classe ${esc(s.header.classe)}</label>
+    <div class="lb-list" id="trList"></div>
+    <div class="row">${s.header.trilha ? `<button class="danger" id="trNone">Ficar sem trilha</button>` : ""}<button data-close>Fechar</button></div>`);
+  w.querySelector(".box").classList.add("lb-box");
+  const draw = () => {
+    const ts = trilhasLib(w.querySelector("#trCls").checked ? s.header.classe : null);
+    w.querySelector("#trList").innerHTML = ts.length ? ts.map((t, i) => `<details class="lb-item"><summary><b>${esc(t.nome)}</b> <span class="muted small">${esc([t.classe, t.livro].filter(Boolean).join(" · "))}</span>
+        ${atual?.key === t.key ? `<span class="small">✓ atual</span>` : `<button class="primary icon" data-trpick="${i}">Escolher</button>`}</summary>
+        <ul class="nexlist">${t.habs.map((it) => `<li class="${num(it.nex) <= nex ? "" : "muted"}"><b>NEX ${num(it.nex)}% — ${esc(it.nome)}</b> ${num(it.nex) <= nex ? "✓" : "🔒"}<div class="lb-desc">${esc(it.desc)}</div></li>`).join("")}</ul>
+      </details>`).join("") : `<p class="muted">Nenhuma trilha ${w.querySelector("#trCls").checked ? `de ${esc(s.header.classe)} ` : ""}nas bibliotecas carregadas.</p>`;
+    w._ts = ts;
+  };
+  const tirarAntiga = () => {
+    const old = atual; if (!old) return 0;
+    const antes = s.habilidades.length;
+    s.habilidades = s.habilidades.filter((h) => !String(h.trilhaRef || "").startsWith(old.key + "|"));
+    for (const n of TRILHA_NEX) s.trilhaHab[n] = "";
+    return antes - s.habilidades.length;
+  };
+  w.querySelector("#trCls").addEventListener("change", draw);
+  w.querySelector("#trNone")?.addEventListener("click", () => {
+    const r = tirarAntiga(); s.header.trilha = ""; s.header.trilhaKey = "";
+    touchSheet(s); w.remove(); render(); toast(`Ficha sem trilha${r ? ` (${r} habilidade(s) da trilha removida(s))` : ""}.`);
+  });
+  w.addEventListener("click", (e) => {
+    const b = e.target.closest("[data-trpick]"); if (!b) return; e.preventDefault();
+    const t = w._ts[Number(b.dataset.trpick)]; if (!t) return;
+    const r = tirarAntiga();
+    s.header.trilha = t.nome; s.header.trilhaKey = t.key;
+    const n = aplicarTrilha(s, t, -1, nex, true);
+    touchSheet(s); w.remove(); tab = "principal"; render();
+    toast(`Trilha ${t.nome}: ${n ? `${n} habilidade(s) até NEX ${nex}% adicionada(s) na aba Habilidades` : `nenhuma habilidade até NEX ${nex}% ainda`}${r ? `; ${r} da trilha anterior removida(s)` : ""}.`);
+  });
+  draw();
 }
 function libMenuDialog() {
   const lib = libLoad();
@@ -2143,6 +2252,8 @@ app.addEventListener("click", async (e) => {
   if (d.reqno) return respReq(d.reqno, false);
   if (b.id === "btnMenu") return menuDialog();
   if (d.lib) return libDialog(d.lib);
+  if (d.trilha) return trilhaDialog(s);
+  if (d.trilhaok && s) { const t = trilhaAtual(s); if (t) { const n = aplicarTrilha(s, t, -1, num(s.nex)); s.header.trilhaKey = t.key; touch(); render(); toast(`${n} habilidade(s) da trilha adicionada(s) na aba Habilidades.`); } return; }
   if (b.id === "btnSecret") { secretRoll = !secretRoll; toast(secretRoll ? "Rolagem secreta: só o mestre verá os resultados." : "Rolagens visíveis para todos de novo."); render(); return; }
   if (b.id === "btnFeedClear") { lsSet(feedKey(), "{}"); render(); return; }
   if (b.id === "btnHidden") { hiddenRolls = !hiddenRolls; toast(hiddenRolls ? "Rolagens ocultas: só você vê os resultados." : "Rolagens visíveis para todos."); render(); return; }

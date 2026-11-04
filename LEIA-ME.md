@@ -104,3 +104,12 @@ Arquivos novos: `efeitos.js`, `efeito.html` e os selos `selo-sangue.svg`, `selo-
 - Em ⋯, cada pessoa ainda escolhe: som, animações na própria ficha, ver os críticos dos outros e o fundo animado.
 
 > Os símbolos dos elementos foram desenhados para a extensão (não são os oficiais).
+
+## Novidades da versão 3.9 — trilhas dos livros
+
+- **📚 Escolher trilha** (aba Principal, em “Trilha e afinidade”): lista as trilhas da classe que estão nas bibliotecas carregadas (livro básico, *Sobrevivendo ao Horror* e outras que forem importadas). Ao escolher, as habilidades da trilha até o NEX atual entram na aba Habilidades e nos campos de NEX 10/40/65/99, então uma ficha criada já com NEX alto recebe tudo de uma vez. Os próximos patamares aparecem como “Próxima: …”.
+- **Subir de NEX:** a janela já oferece a habilidade de trilha do patamar novo (marcada para adicionar), também no “Só mudar o NEX”. Sem trilha escolhida, mostra o botão para escolher.
+- **Trocar de trilha** remove as habilidades que a trilha anterior adicionou sozinha; “Ficar sem trilha” limpa tudo. Se faltar alguma habilidade da trilha, a ficha avisa com o botão “Adicionar”.
+- **📚 Adicionar do livro:** a lista não para mais em 120 entradas (era isso que cortava as habilidades do livro básico) e mostra quantas entradas há.
+
+Arquivos para trocar: `app.js`, `style.css`, `index.html`, `manifest.json` e este `LEIA-ME.md`.
