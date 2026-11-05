@@ -117,3 +117,18 @@ Arquivos para trocar: `app.js`, `style.css`, `index.html`, `manifest.json` e est
 ### 3.9.1
 - O botão **📚 Escolher** da trilha não perde mais o clique quando o nome da trilha acabou de ser digitado no campo ao lado (vale para os outros campos de texto que redesenham a ficha).
 - Sem biblioteca no navegador, o botão explica como receber a do mestre.
+
+## Novidades da versão 3.10 — versão ultimate (forma suprema)
+
+Baseada em *Arquivos Secretos 2: Hexatombe*, p. 96–97 (“As máscaras na sua mesa”).
+
+- **Botão ULT** no topo da ficha: abre a aba **⚡ Ult**, onde o jogador habilita a versão ultimate da ficha (com o consentimento do mestre) e decide como ela fica.
+- **Identidade:** nome da forma (ex.: Mutilador Noturno), objeto da desumanização (máscara, capuz, elmo…), aparência/justificativa e imagem.
+- **Custo:** ativar custa 1 ação de movimento e 6 SAN; cada rodada além da primeira custa 2 SAN, cobrados sozinhos no “Nova rodada”. Nas fichas com a regra de Determinação (sem Sanidade) o custo sai dos PD. Os valores são editáveis.
+- **Ganhos ao ativar:** +20 PV e +10 PD (ou PE) atuais e máximos e +10 na Defesa, editáveis. Ao desativar (ação livre), os pontos recebidos saem dos atuais e dos máximos; com menos PV que isso, o personagem fica com 0 PV e morrendo (a ficha avisa e pede confirmação).
+- **Aprimoramentos à escolha:** rituais Discente/Verdadeiro sem o custo extra; +2 dados do mesmo tipo em todos os danos (opcional também nos rituais); +5 em testes de qualquer tipo; +5 na DT de habilidades e rituais. Os marcados entram sozinhos nas rolagens com a forma ativa (marcados com ⚡).
+- **Habilidades exclusivas:** habilidades novas, ou efeitos novos para uma habilidade que o personagem já tem, que só aparecem com a forma ativa (na aba Habilidades e com ⚡ na habilidade aprimorada).
+- Card da forma suprema na aba Principal e na janelinha do token, para ativar/desativar rápido; ⚡ ao lado do nome no painel do mestre.
+- Enlouquecendo na forma suprema: a ficha lembra que, se ficar insano, o personagem vira um NPC controlado pela intenção assassina.
+
+Arquivos para trocar: `app.js`, `style.css`, `index.html`, `manifest.json` e este `LEIA-ME.md`.

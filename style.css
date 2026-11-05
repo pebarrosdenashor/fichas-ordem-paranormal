@@ -534,3 +534,28 @@ body[data-tema="Medo"] .tabs button.on, body[data-tema="Conhecimento"] .tabs but
 .lb-item .nexlist { font-size: 14px; margin: 6px 0; }
 .lb-item .nexlist .lb-desc { margin: 2px 0 0; font-weight: normal; }
 label .row > input { flex: 1; min-width: 0; }
+
+/* ---------- v3.10: versão ultimate / forma suprema ---------- */
+.ult-btn { font-family: Cinzel, serif; font-weight: 800; font-size: 11px; letter-spacing: .08em; color: #ffb3bd; border-color: #6b0f1d; }
+.ult-btn.ready { background: #2a050b; border-color: var(--accent); color: #fff; }
+.ult-btn.on { background: var(--accent); border-color: #ff3b55; color: #fff; animation: ultPulse 1.6s ease-in-out infinite; }
+@keyframes ultPulse { 0%, 100% { box-shadow: 0 0 0 0 rgba(255, 59, 85, .55); } 50% { box-shadow: 0 0 10px 3px rgba(255, 59, 85, .55); } }
+.card.ult-card { border-color: #8a0f22; background: linear-gradient(160deg, #22060b, var(--panel) 70%); }
+.card.ult-card.ativo { border-color: #ff3b55; box-shadow: 0 0 14px rgba(200, 16, 46, .35); }
+.card.ult-card p { margin: 4px 0 8px; }
+button.ult-go { background: linear-gradient(90deg, #8a0f22, var(--accent)); border-color: #ff3b55; color: #fff; font-weight: 700; letter-spacing: .03em; }
+button.ult-go.off { background: var(--panel2); border-color: var(--accent); color: #ffb3bd; }
+button.ult-go .small { font-weight: 400; opacity: .85; font-size: 11px; }
+.ult-opts { display: flex; flex-direction: column; gap: 6px; }
+.ult-opts .row.mini input { width: 56px; }
+.ult-opts .sub { margin-left: 22px; }
+.ult-txt { display: block; color: #ff9aa8; font-size: 11px; text-transform: none; letter-spacing: 0; }
+.ult-mk { color: #ff3b55; font-size: 12px; margin-right: 2px; }
+.ult-note { width: 100%; font-size: 12px; padding: 6px 8px; border-left: 2px solid var(--accent); background: #24070c; margin-bottom: 4px; }
+details.item.is-ult { border-color: #8a0f22; }
+.ult-hab { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 6px 0; border-top: 1px solid #3a0a12; }
+.ult-hab:first-of-type { border-top: 0; }
+.qk-ult { margin: 6px 0; }
+.qk-ult button { width: 100%; }
+body.ult-on .topbar { box-shadow: 0 2px 0 -1px var(--accent); }
+body.ult-on .bar.pv .fill { box-shadow: 0 0 8px rgba(255, 59, 85, .6) inset; }

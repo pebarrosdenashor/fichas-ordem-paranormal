@@ -1,6 +1,6 @@
 import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.9.1";
-import * as FX from "./efeitos.js?v=3.9.1";
+import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.10.0";
+import * as FX from "./efeitos.js?v=3.10.0";
 
 /* =========================================================
    Ficha de Ordem Paranormal — extensão para Owlbear Rodeo
@@ -234,7 +234,15 @@ const SCHEMAS = {
     attrs: (it) => `data-cat="${num(it.categoria)}"`,
   },
 };
-const LIST_PATHS = { ataques: "ataques", habilidades: "habilidades", rituais: "rituais.lista", armas: "armas", municoes: "municoes", protecoes: "protecoes", gerais: "gerais", amaldicoados: "amaldicoados" };
+// v3.10: habilidades que só existem na forma suprema (ult)
+SCHEMAS.ultHabs = {
+  title: "habilidade da forma suprema",
+  fields: [F("nome", "Nome", "text", { wide: true }), F("alvo", "Aprimora a habilidade (vazio = habilidade nova)", "text", { ph: "Ex.: Golpe Pesado" }), F("custo", "Custo em PD (0 = sem custo)", "num", { def: 0, min: 0 }), F("img", "Imagem", "img"), F("desc", "Descrição", "textarea")],
+  info: (it) => [it.alvo ? `aprimora ${it.alvo}` : "nova", num(it.custo) ? `${num(it.custo)} PD` : ""].filter(Boolean).join(" · "),
+  actions: (p, it) => num(it.custo) ? `<button class="primary" data-usehab="${p}">Usar (−${num(it.custo)} PD)</button>` : `<button class="primary" data-hablog="${p}">Usar</button>`,
+  hay: (it) => [it.nome, it.alvo, it.desc].join(" "),
+};
+const LIST_PATHS = { ultHabs: "ult.habilidades", ataques: "ataques", habilidades: "habilidades", rituais: "rituais.lista", armas: "armas", municoes: "municoes", protecoes: "protecoes", gerais: "gerais", amaldicoados: "amaldicoados" };
 
 /* ---------- Utilidades ---------- */
 const uid = () => Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
@@ -290,6 +298,7 @@ function newSheet() {
     notas: { anotacoes: "", aparencia: "", personalidade: "", historico: "", objetivo: "" },
     token: { barrasTodos: true },
     pvTemp: 0, pdTemp: 0, rdGeral: 0, rdTipos: [], descanso: "Normal", buffs: [],
+    ult: ultBase(),
   };
 }
 // Garante que fichas antigas ganhem os campos novos
@@ -298,7 +307,8 @@ function upgrade(s) {
   const base = newSheet();
   for (const k of Object.keys(base)) if (s[k] === undefined) s[k] = base[k];
   for (const [n, a] of PERICIAS) if (!s.pericias[n]) s.pericias[n] = { attr: a, treino: 0, outros: 0 };
-  for (const k of ["header", "equip", "notas", "defesa", "rituais", "trilhaHab", "token"]) s[k] = { ...base[k], ...s[k] };
+  for (const k of ["header", "equip", "notas", "defesa", "rituais", "trilhaHab", "token", "ult"]) s[k] = { ...base[k], ...s[k] };
+  if (!Array.isArray(s.ult.habilidades)) s.ult.habilidades = [];
   for (const [key, path] of Object.entries(LIST_PATHS)) {
     const arr = getPath(s, path); if (!Array.isArray(arr)) continue;
     const proto = newItem(SCHEMAS[key]);
@@ -499,7 +509,7 @@ function cargaPen(s, pericia) { return sobrecarregado(s) && (PER_MARK[pericia] |
 function periciaBonus(s, n) { const p = s.pericias[n]; return p ? num(p.treino) + num(p.outros) : 0; }
 function periciaTotal(s, n) { return periciaBonus(s, n) + cargaPen(s, n); }
 function hexaPen(s) { return -clamp(num(s.hexa?.pen), 0, 6); } // Hexatombe: −1 em testes por sino (máx. −6)
-function periciaTeste(s, n) { return periciaTotal(s, n) + hexaPen(s); }
+function periciaTeste(s, n) { return periciaTotal(s, n) + hexaPen(s) + ultTeste(s); }
 function dicePenalty(s, attr, pericia, isAttack) {
   const fx = condFx(s);
   let pen = fx.dAll;
@@ -518,7 +528,7 @@ function defPenalty(s) {
   if (d.has("vulneravel")) p -= 2;
   return p + (sobrecarregado(s) ? -5 : 0);
 }
-function defesaTotal(s) { return 10 + attrVal(s, "AGI") + defProtecoes(s) + num(s.defesa.equip) + num(s.defesa.outros) + defPenalty(s); }
+function defesaTotal(s) { return 10 + attrVal(s, "AGI") + defProtecoes(s) + num(s.defesa.equip) + num(s.defesa.outros) + defPenalty(s) + ultDef(s); }
 function deslocEfetivo(s) {
   const mov = condFx(s).mov; let d = num(s.desloc);
   if (sobrecarregado(s)) d -= 3;
@@ -550,7 +560,7 @@ const CALC = {
   blocos: (s) => { const e = deslocEfetivo(s); return `${+(e / 1.5).toFixed(1)} blocos${e !== num(s.desloc) ? ` (efetivo ${e}m)` : ""}`; },
   agi: (s) => attrVal(s, "AGI"),
   defProt: (s) => defProtecoes(s),
-  defPen: (s) => { const p = defPenalty(s); return p ? `Condições/carga: ${p} na Defesa` : ""; },
+  defPen: (s) => { const p = defPenalty(s); return [p ? `Condições/carga: ${p} na Defesa` : "", ultDef(s) ? `Forma suprema: +${ultDef(s)} na Defesa (já somado)` : ""].filter(Boolean).join(" · "); },
   defesa: (s) => defesaTotal(s),
   bloqueio: (s) => periciaTotal(s, "Fortitude"),
   esquiva: (s) => defesaTotal(s) + periciaTotal(s, "Reflexos"),
@@ -647,9 +657,9 @@ function testLine(s, pericia, isAttack, extraBonus = 0, opts = {}) {
   const p = s.pericias[pericia]; const attr = p ? p.attr : "AGI";
   const nDice = attrVal(s, attr) - dicePenalty(s, attr, pericia, isAttack);
   const m = opts.noMod ? { dados: 0, bonus: 0 } : takeNextMod();
-  const r = rollTest(nDice + num(m.dados) + num(opts.dados)); const b = (p ? periciaTeste(s, pericia) : hexaPen(s)) + num(extraBonus) + num(m.bonus);
+  const r = rollTest(nDice + num(m.dados) + num(opts.dados)); const b = (p ? periciaTeste(s, pericia) : hexaPen(s) + ultTeste(s)) + num(extraBonus) + num(m.bonus);
   if (!opts.noAnim) { diceAnim(r.dice, r.pick, r.worst); marcarDrama(r.pick, pericia); }
-  return { ...r, bonus: b, total: r.pick + b, txt: `[${r.dice.join(", ")}]${r.worst ? " (pior)" : ""} → ${r.pick} ${fmt(b)} = ${r.pick + b}${modTxt(m)}${diceWhy(s, attr, pericia, isAttack, num(m.dados))}${opts.nota || ""}` };
+  return { ...r, bonus: b, total: r.pick + b, txt: `[${r.dice.join(", ")}]${r.worst ? " (pior)" : ""} → ${r.pick} ${fmt(b)} = ${r.pick + b}${modTxt(m)}${diceWhy(s, attr, pericia, isAttack, num(m.dados))}${ultTeste(s) ? ` (⚡ forma suprema ${fmt(ultTeste(s))})` : ""}${opts.nota || ""}` };
 }
 function rollPericia(s, n) {
   if ((PER_MARK[n] || "").includes("*") && !num(s.pericias[n].treino)) return toast(`${n} só pode ser usada se for treinada.`);
@@ -658,9 +668,9 @@ function rollPericia(s, n) {
 }
 function rollAttr(s, a) {
   const m = takeNextMod();
-  const r = rollTest(attrVal(s, a) - dicePenalty(s, a, null, false) + num(m.dados)); const hp = hexaPen(s) + num(m.bonus);
+  const r = rollTest(attrVal(s, a) - dicePenalty(s, a, null, false) + num(m.dados)); const hp = hexaPen(s) + ultTeste(s) + num(m.bonus);
   diceAnim(r.dice, r.pick, r.worst); marcarDrama(r.pick, `Teste de ${a}`);
-  announce(`${s.header.personagem} — teste de ${a}${diceWhy(s, a, null, false, num(m.dados))}: [${r.dice.join(", ")}]${r.worst ? " (pior)" : ""} → ${r.pick}${hp ? ` ${fmt(hp)} = ${r.pick + hp}` : ""}${modTxt(m)}`);
+  announce(`${s.header.personagem} — teste de ${a}${diceWhy(s, a, null, false, num(m.dados))}: [${r.dice.join(", ")}]${r.worst ? " (pior)" : ""} → ${r.pick}${hp ? ` ${fmt(hp)} = ${r.pick + hp}` : ""}${modTxt(m)}${ultTeste(s) ? ` (⚡ forma suprema ${fmt(ultTeste(s))})` : ""}`);
 }
 function rollAttack(s, a) {
   // a = { nome, pericia, bonus, critico, mult, dano, tipo, attrDano (sigla ou ""), adicionais }
@@ -670,10 +680,10 @@ function rollAttack(s, a) {
   const mult = crit ? Math.max(1, num(a.mult) || 2) : 1;
   if (crit) marcarDrama(20, `${a.nome || "Ataque"} · dano ×${mult}`, t.pick < 20 ? `margem ${t.pick}` : "");
   else if (drama) drama.sub = a.nome || drama.sub;
-  const d = rollExpr(a.dano, mult); const dmgGroups = [...d.groups];
+  const d = rollExpr(ultDanoExpr(s, a.dano), mult); const dmgGroups = [...d.groups];
   const attrB = a.attrDano ? attrVal(s, a.attrDano) : 0;
   let total = d.total + attrB;
-  let dano = d.ok ? `${d.txt}${attrB ? ` ${fmt(attrB)} (${a.attrDano})` : ""}` : (attrB ? `${fmt(attrB)} (${a.attrDano})` : "");
+  let dano = d.ok ? `${d.txt}${attrB ? ` ${fmt(attrB)} (${a.attrDano})` : ""}${ultDanoExpr(s, a.dano) !== a.dano ? ` (⚡ +${num(s.ult.danoN)}d forma suprema)` : ""}` : (attrB ? `${fmt(attrB)} (${a.attrDano})` : "");
   const extras = [];
   if ((s.hexa?.rewards || []).includes("Rancor")) { total += 5; dano += " +5 (Rancor)"; }
   if (s.hexa?.batalha) { const bt = rollExpr("1d10"); extras.push(`+ ${bt.total} se o alvo for ${s.hexa.batalha} (batalha de intenções)`); }
@@ -729,15 +739,17 @@ function spendPD(s, cost, label, btn) {
 }
 function castRitual(s, path, versao, btn) {
   const r = getPath(s, path); if (!r) return;
-  const extra = versao === "discente" ? num(r.custoDiscente) : versao === "verdadeiro" ? num(r.custoVerdadeiro) : 0;
+  let extra = versao === "discente" ? num(r.custoDiscente) : versao === "verdadeiro" ? num(r.custoVerdadeiro) : 0;
+  const ultLivre = extra > 0 && ultOn(s) && s.ult.ritualGratis; if (ultLivre) extra = 0;
   const cost = CUSTO_CIRCULO[num(r.circulo)] + extra + condFx(s).custo;
   if (!spendPD(s, cost, path + versao, btn)) return;
   const expr = versao === "discente" ? r.dadosDiscente : versao === "verdadeiro" ? r.dadosVerdadeiro : r.dados;
-  const d = rollExpr(expr || (versao !== "normal" ? r.dados : "")); if (d.groups.length) trayRoll(d.groups);
+  const baseExpr = expr || (versao !== "normal" ? r.dados : ""); const rExpr = ultOn(s) && s.ult.danoRitual ? ultDanoExpr(s, baseExpr) : baseExpr;
+  const d = rollExpr(rExpr); if (d.groups.length) trayRoll(d.groups);
   const nome = versao === "normal" ? r.nome : `${r.nome} (${versao === "discente" ? "Discente" : "Verdadeiro"})`;
   efeitoRitual(s, r.elemento, nome || "Ritual", `−${cost} ${resSig(s)}${d.ok ? ` · efeito ${d.total}` : ""}`);
-  const res = r.resPericia && r.resPericia !== "—" ? ` · ${r.resPericia} DT ${num(s.rituais.dt)}${r.resEfeito && r.resEfeito !== "—" ? " " + r.resEfeito.toLowerCase() : ""}` : "";
-  announce(`${s.header.personagem} conjurou ${nome || "ritual"} (−${cost} PD)${res}${d.ok ? `\nEfeito: ${d.total}  —  ${d.txt}` : ""}`);
+  const res = r.resPericia && r.resPericia !== "—" ? ` · ${r.resPericia} DT ${dtRitual(s)}${r.resEfeito && r.resEfeito !== "—" ? " " + r.resEfeito.toLowerCase() : ""}` : "";
+  announce(`${s.header.personagem} conjurou ${nome || "ritual"} (−${cost} PD${ultLivre ? ", versão avançada sem custo extra pela forma suprema" : ""})${res}${d.ok ? `\nEfeito: ${d.total}  —  ${d.txt}${rExpr !== baseExpr ? ` (⚡ +${num(s.ult.danoN)}d)` : ""}` : ""}`);
   render();
 }
 function useHab(s, path, btn) {
@@ -788,9 +800,10 @@ function listHTML(key) {
     const p = `${base}.${i}`;
     const star = key === "rituais" && af && it.elemento === af ? `<span class="afin" title="Elemento da sua afinidade">★</span>` : "";
     const elem = (key === "rituais" || key === "amaldicoados") && FX.EL_COR[it.elemento] ? it.elemento : "";
-    const acts = sc.actions ? sc.actions(p, it) : "";
-    return `<details class="item ${star ? "is-afin" : ""}" data-id="${it.id}" data-idx="${i}" data-hay="${esc((sc.hay(it) || "").toLowerCase())}" ${sc.attrs ? sc.attrs(it) : ""} ${elem ? `data-elem="${elem}" style="--elc:${FX.corDe(elem)}"` : ""} ${openCards.has(it.id) ? "open" : ""}>
-      <summary><span class="drag" draggable="true" data-drag="${key}|${i}" title="Arraste para reordenar">⋮⋮</span>${star}${elem ? `<span class="el-glifo" title="${esc(elem)}">${FX.glifo(elem, 18)}</span>` : ""}<span class="sum-name" data-calc="sumName|${p}"></span><span class="sum-info" data-calc="sumInfo|${p}|${key}"></span>${sc.quick ? sc.quick(p) : ""}${RAPIDO_KEYS.includes(key) ? `<button class="icon qk-tog ${isRapido(s, key, it.id) ? "on" : ""}" data-rapido="${key}|${it.id}" title="${isRapido(s, key, it.id) ? "Tirar do acesso rápido" : "Pôr no acesso rápido (até 4)"}">⚡</button>` : ""}${delBtn(p)}</summary>
+    const ultH = key === "habilidades" ? ultAprimora(s, it) : null;
+    const acts = (ultH ? `<div class="ult-note">⚡ <b>${esc(s.ult.nome || "Forma suprema")}:</b> ${esc(ultH.desc || ultH.nome)}</div>` : "") + (sc.actions ? sc.actions(p, it) : "");
+    return `<details class="item ${star ? "is-afin" : ""} ${ultH ? "is-ult" : ""}" data-id="${it.id}" data-idx="${i}" data-hay="${esc((sc.hay(it) || "").toLowerCase())}" ${sc.attrs ? sc.attrs(it) : ""} ${elem ? `data-elem="${elem}" style="--elc:${FX.corDe(elem)}"` : ""} ${openCards.has(it.id) ? "open" : ""}>
+      <summary><span class="drag" draggable="true" data-drag="${key}|${i}" title="Arraste para reordenar">⋮⋮</span>${star}${ultH ? `<span class="ult-mk" title="Aprimorada na forma suprema">⚡</span>` : ""}${elem ? `<span class="el-glifo" title="${esc(elem)}">${FX.glifo(elem, 18)}</span>` : ""}<span class="sum-name" data-calc="sumName|${p}"></span><span class="sum-info" data-calc="sumInfo|${p}|${key}"></span>${sc.quick ? sc.quick(p) : ""}${RAPIDO_KEYS.includes(key) ? `<button class="icon qk-tog ${isRapido(s, key, it.id) ? "on" : ""}" data-rapido="${key}|${it.id}" title="${isRapido(s, key, it.id) ? "Tirar do acesso rápido" : "Pôr no acesso rápido (até 4)"}">⚡</button>` : ""}${delBtn(p)}</summary>
       ${acts ? `<div class="actions">${acts}</div>` : ""}
       <div class="fields">${sc.fields.map((f) => fieldHTML(f, `${p}.${f.k}`, it[f.k])).join("")}</div></details>`;
   }).join("") || `<p class="muted">Nada adicionado ainda.</p>`}</div>
@@ -822,6 +835,7 @@ function applyFilters() {
 function tabsFor() {
   const t = [["principal", "Principal"], ["pericias", "Perícias"], ["combate", "Combate"], ["habilidades", "Habilidades"], ["rituais", "Rituais"], ["inventario", "Inventário"], ["notas", "Notas"], ["interludio", "Interlúdio"], ["dados", "Dados"], ["rolagens", "Rolagens"], ["pratos", "Pratos da mesa"]];
   if (isGM()) t.push(["mesa", "Mesa"]);
+  if (cur()?.ult?.habilitada) t.splice(1, 0, ["ult", "⚡ Ult"]);
   return t;
 }
 const mentalBar = (s) => (isDet(s) ? s.pd : s.san);
@@ -838,7 +852,8 @@ function counterBanner(s, k) {
   const desc = fim ? (morr ? "O personagem começou o terceiro turno morrendo: está morto." : "O personagem começou o terceiro turno enlouquecendo: está insano e passa para o controle do mestre.")
     : morr ? "PV em 0: você está inconsciente e morrendo. No começo de cada turno seu, marque abaixo. Se começar 3 turnos assim na mesma cena, o personagem morre."
     : `${recurso} em 0: você está enlouquecendo. No começo de cada turno seu, marque abaixo. Se começar 3 turnos assim na mesma cena, o personagem fica insano.`;
-  return `<div class="banner ${k} ${fim ? "fim" : ""}"><b>${fim ? (morr ? "☠ MORTO" : "✖ INSANO") : morr ? "MORRENDO" : "ENLOUQUECENDO"}</b><span>${desc}</span>
+  const ultAviso = !morr && ultOn(s) ? `<span class="ult-txt">⚡ Na forma suprema: se ficar insano, o personagem vira um NPC controlado pela intenção assassina (ou semelhante da sua mesa).</span>` : "";
+  return `<div class="banner ${k} ${fim ? "fim" : ""}"><b>${fim ? (morr ? "☠ MORTO" : "✖ INSANO") : morr ? "MORRENDO" : "ENLOUQUECENDO"}</b><span>${desc}</span>${ultAviso}
     <div class="row wrap"><span class="pips">${[1, 2, 3].map((i) => `<span class="pip ${v >= i ? "on" : ""}">${i}</span>`).join("")}</span>
     ${fim ? "" : `<button class="primary" data-dying="${k}|turno">▶ Comecei meu turno ${morr ? "morrendo" : "enlouquecendo"} (${v + 1}/3)</button>`}
     ${v ? `<button class="ghost icon" data-dying="${k}|voltar" title="Desmarcar o último">↶</button>` : ""}
@@ -852,6 +867,7 @@ function tabPrincipal(s) {
   <div id="banners">${bannersHTML(s)}</div>
   ${(s.rapido || []).length ? `<section class="card"><h3>Acesso rápido <span class="muted">também no botão ≡ ao lado do token</span></h3>${quickHTML(s)}</section>` : ""}
   ${hexaCard(s)}
+  ${ultCard(s)}
   <section class="card header">
     <div class="portrait">${imgField("header.img", s.header.img)}</div>
     <div class="hfields">
@@ -967,6 +983,161 @@ function hexaCard(s) {
 
   const desejo = (h.rewards || []).includes("Desejo") ? `<button id="btnDesejo" class="ghost">Usar Desejo: +15 PV temporários e levantar</button>` : "";
   return `<section class="card hexa"><h3>Hexatombe</h3>${surv}${lines.length ? `<ul>${lines.join("")}</ul>` : ""}${desejo}</section>`;
+}
+
+/* =========================================================
+   v3.10 — Versão ultimate da ficha / forma suprema
+   (Arquivos Secretos 2: Hexatombe, p. 96–97 — "As máscaras na sua mesa")
+   ========================================================= */
+function ultBase() {
+  return {
+    habilitada: false, ativo: false, rodada: 0, ganho: null,
+    nome: "Forma suprema", item: "", img: "", desc: "",
+    custoAtivar: 6, custoRodada: 2, // SAN (ou PD na regra de Determinação)
+    pv: 20, pd: 10, def: 10,        // recebidos ao ativar (atuais e máximos)
+    // Recomendações do livro: cada jogador escolhe quais a ficha recebe
+    ritualGratis: false, danoDados: false, danoN: 2, danoRitual: false, testes: false, testesN: 5, dt: false, dtN: 5,
+    habilidades: [],
+  };
+}
+const ultOn = (s) => !!(s?.ult?.habilitada && s.ult.ativo);
+const ultTeste = (s) => (ultOn(s) && s.ult.testes ? num(s.ult.testesN) : 0);
+const ultDef = (s) => (ultOn(s) ? num(s.ult.def) : 0);
+const ultDT = (s) => (ultOn(s) && s.ult.dt ? num(s.ult.dtN) : 0);
+const dtRitual = (s) => num(s.rituais.dt) + ultDT(s);
+// Recurso que paga a forma suprema: Sanidade (livro) ou Determinação (regra de Determinação, que não tem SAN)
+const ultPagaSig = (s) => (isDet(s) ? "PD" : "SAN");
+// "+2 dados do mesmo tipo": 6d6 vira 8d6 (só o primeiro grupo de dados da expressão)
+function ultDanoExpr(s, expr) {
+  if (!ultOn(s) || !s.ult.danoDados || !num(s.ult.danoN)) return expr;
+  return String(expr || "").replace(/(\d*)d(\d+)/i, (m0, q, f) => `${(Number(q) || 1) + num(s.ult.danoN)}d${f}`);
+}
+function ultAprimora(s, hab) {
+  if (!ultOn(s) || !hab?.nome) return null;
+  return s.ult.habilidades.find((h) => h.alvo && normTxt(h.alvo) === normTxt(hab.nome)) || null;
+}
+function ultResumo(s) {
+  const u = s.ult; const L = [`+${num(u.pv)} PV`, `+${num(u.pd)} PD`, `+${num(u.def)} Defesa`];
+  if (u.testes) L.push(`${fmt(num(u.testesN))} em testes`);
+  if (u.danoDados) L.push(`+${num(u.danoN)} dados de dano${u.danoRitual ? " (rituais também)" : ""}`);
+  if (u.dt) L.push(`DT ${fmt(num(u.dtN))}`);
+  if (u.ritualGratis) L.push("rituais avançados sem custo extra");
+  const n = u.habilidades.length; if (n) L.push(`${n} habilidade${n > 1 ? "s" : ""} exclusiva${n > 1 ? "s" : ""}`);
+  return L.join(" · ");
+}
+function ultBotao(s) {
+  const u = s.ult;
+  return u.ativo
+    ? `<button class="ult-go off" id="btnUltOff" title="Ação livre">⏹ Desativar ${esc(u.nome || "forma suprema")} <span class="small">(ação livre)</span></button>`
+    : `<button class="ult-go" id="btnUltOn" title="1 ação de movimento">⚡ Ativar ${esc(u.nome || "forma suprema")} <span class="small">(movimento · −${num(u.custoAtivar)} ${ultPagaSig(s)})</span></button>`;
+}
+function ultCard(s) {
+  const u = s.ult; if (!u?.habilitada) return "";
+  return `<section class="card ult-card ${u.ativo ? "ativo" : ""}">
+    <h3>⚡ ${esc(u.nome || "Forma suprema")} <span class="muted">${u.ativo ? `ativa · rodada ${num(u.rodada)}` : "inativa"}</span></h3>
+    ${u.ativo ? `<p class="small">Cada rodada além da primeira custa <b>${num(u.custoRodada)} ${ultPagaSig(s)}</b> (cobrado sozinho em “Nova rodada”). Ao desativar, perde ${num(u.ganho?.pv ?? u.pv)} PV atuais e máximos${num(s.pv.atual) <= num(u.ganho?.pv ?? u.pv) ? ` — <b class="over">com ${num(s.pv.atual)} PV, você fica com 0 e morrendo</b>` : ""}.</p>` : ""}
+    <p class="muted small">${esc(ultResumo(s))}</p>
+    <div class="row wrap">${ultBotao(s)}<button class="ghost" data-tab="ult">Configurar</button></div>
+  </section>`;
+}
+function ck(path, val, label) { return `<label class="check"><input type="checkbox" data-path="${path}" data-rerender="1" ${val ? "checked" : ""}> ${label}</label>`; }
+function tabUlt(s) {
+  const u = s.ult; const pg = ultPagaSig(s);
+  const intro = `<section class="card ult-card ${u.ativo ? "ativo" : ""}">
+    <h3>⚡ Versão ultimate <span class="muted">Arquivos Secretos 2, p. 96–97</span></h3>
+    <p class="small">Uma vestimenta, arma ou item (como a máscara do Mutilador Noturno) desumaniza o personagem e manifesta a intenção assassina dele numa forma poderosíssima. Monte aqui, com o consentimento do mestre, como fica a sua ficha na forma suprema.</p>
+    ${ck("ult.habilitada", u.habilitada, "Habilitar a versão ultimate desta ficha")}
+    ${u.habilitada ? `<div class="row wrap" style="margin-top:8px">${ultBotao(s)}</div>` : ""}
+  </section>`;
+  if (!u.habilitada) return intro;
+  const ganhoAtivo = u.ativo && u.ganho && (num(u.ganho.pv) !== num(u.pv) || num(u.ganho.pd) !== num(u.pd))
+    ? `<p class="muted small warn">A forma ativa agora deu +${num(u.ganho.pv)} PV e +${num(u.ganho.pd)} PD; os valores novos valem na próxima ativação.</p>` : "";
+  return `${intro}
+  <section class="card"><h3>Identidade da forma</h3>
+    <div class="grid2">
+      <label>Nome da forma ${inp("ult.nome", u.nome, "text", 'placeholder="Ex.: Mutilador Noturno" data-rerender="1"')}</label>
+      <label>Objeto da desumanização ${inp("ult.item", u.item, "text", 'placeholder="Ex.: máscara, capuz, elmo…"')}</label>
+      <label class="wide">Aparência e justificativa narrativa ${ta("ult.desc", u.desc, 3)}</label>
+      <label class="wide">Imagem da forma suprema ${imgField("ult.img", u.img)}</label>
+    </div>
+  </section>
+
+  <section class="card"><h3>Custo <span class="muted">regra do livro</span></h3>
+    <div class="grid2">
+      <label>Ativar (1 ação de movimento) <div class="row">${inp("ult.custoAtivar", u.custoAtivar, "num", 'min="0"')}<span class="muted" data-keep>${pg}</span></div></label>
+      <label>Cada rodada além da primeira <div class="row">${inp("ult.custoRodada", u.custoRodada, "num", 'min="0"')}<span class="muted" data-keep>${pg}</span></div></label>
+    </div>
+    <p class="muted small" data-keep>${isDet(s) ? "Esta ficha usa a regra de Determinação (sem Sanidade), então o custo sai da Determinação." : "O custo sai da Sanidade."} Desativar é uma ação livre e tira todos os benefícios.</p>
+  </section>
+
+  <section class="card"><h3>Ao ativar, você recebe</h3>
+    <div class="grid3">
+      <label>PV atuais e máximos ${inp("ult.pv", u.pv, "num", 'min="0"')}</label>
+      <label>PD atuais e máximos ${inp("ult.pd", u.pd, "num", 'min="0"')}</label>
+      <label>Defesa ${inp("ult.def", u.def, "num")}</label>
+    </div>
+    ${ganhoAtivo}
+    <p class="muted small">Ao desativar, os PV e PD recebidos saem dos atuais e dos máximos. Se tiver menos PV atuais do que os recebidos, fica com 0 PV e morrendo.</p>
+  </section>
+
+  <section class="card"><h3>Aprimoramentos <span class="muted">escolha os da sua ficha</span></h3>
+    <div class="ult-opts">
+      ${ck("ult.ritualGratis", u.ritualGratis, "Conjurar rituais nas formas avançadas (Discente e Verdadeiro) sem pagar o custo extra delas")}
+      <div class="row wrap">${ck("ult.danoDados", u.danoDados, "Todos os danos aumentam em")}<span class="row mini">+${inp("ult.danoN", u.danoN, "num", 'min="0" style="width:56px"')} dados do mesmo tipo</span></div>
+      ${u.danoDados ? `<div class="sub">${ck("ult.danoRitual", u.danoRitual, "Também nos dados dos rituais (deixe desligado se seus rituais rolam cura)")}</div>` : ""}
+      <div class="row wrap">${ck("ult.testes", u.testes, "Bônus em testes de qualquer tipo:")}<span class="row mini">${inp("ult.testesN", u.testesN, "num", 'style="width:56px"')}</span></div>
+      <div class="row wrap">${ck("ult.dt", u.dt, "A DT das suas habilidades (poderes, rituais etc.) aumenta em")}<span class="row mini">+${inp("ult.dtN", u.dtN, "num", 'style="width:56px"')}</span></div>
+      ${u.dt ? `<p class="muted small sub">DT dos rituais: ${num(s.rituais.dt)} → ${num(s.rituais.dt) + num(u.dtN)} na forma suprema.</p>` : ""}
+    </div>
+    <p class="muted small">Os aprimoramentos marcados entram sozinhos nas rolagens enquanto a forma estiver ativa (aparecem com ⚡ no resultado).</p>
+  </section>
+
+  <section class="card"><h3>Habilidades da forma suprema <span class="muted">só aparecem com ela ativa</span></h3>
+    <p class="muted small">Crie uma habilidade nova ou um efeito novo para uma habilidade que você já tem (escreva o nome dela em “Aprimora a habilidade”).</p>
+    ${listHTML("ultHabs")}
+  </section>`;
+}
+const ultConfirm = {};
+function ultAtivar(s, btn) {
+  const u = s.ult; if (!u.habilitada || u.ativo) return;
+  const bar = mentalBar(s); const c = Math.max(0, num(u.custoAtivar)); const k = s.id + "on";
+  if (num(bar.atual) <= c && !ultConfirm[k]) {
+    ultConfirm[k] = true; setTimeout(() => delete ultConfirm[k], 4000); btn?.classList.add("confirm");
+    return toast(`Ativar custa ${c} ${ultPagaSig(s)} e você tem ${num(bar.atual)}: vai ficar enlouquecendo. Clique de novo para ativar mesmo assim.`);
+  }
+  delete ultConfirm[k];
+  bar.atual = Math.max(0, num(bar.atual) - c);
+  const g = { pv: Math.max(0, num(u.pv)), pd: Math.max(0, num(u.pd)) };
+  s.pv.max = num(s.pv.max) + g.pv; s.pv.atual = num(s.pv.atual) + g.pv;
+  s.pd.max = num(s.pd.max) + g.pd; s.pd.atual = num(s.pd.atual) + g.pd;
+  if (num(s.pv.atual) > 0) s.morrendo = 0;
+  if (num(mentalBar(s).atual) > 0) s.enlouquecendo = 0;
+  u.ganho = g; u.ativo = true; u.rodada = 1;
+  touchSheet(s); render();
+  efeitoRitual(s, ELEMENTOS.includes(s.header.afinidade) ? s.header.afinidade : "Sangue", u.nome || "Forma suprema", "ULTIMATE");
+  announce(`⚡ ${s.header.personagem} assume ${u.nome || "a forma suprema"}${u.item ? ` (${u.item})` : ""}! Ação de movimento, −${c} ${ultPagaSig(s)}.\n${ultResumo(s)}`);
+}
+function ultDesativar(s, silencioso, btn) {
+  const u = s.ult; if (!u.ativo) return;
+  const g = u.ganho || { pv: num(u.pv), pd: num(u.pd) }; const k = s.id + "off";
+  if (!silencioso && num(s.pv.atual) <= g.pv && !ultConfirm[k]) {
+    ultConfirm[k] = true; setTimeout(() => delete ultConfirm[k], 4000); btn?.classList.add("confirm");
+    return toast(`Você tem ${num(s.pv.atual)} PV: ao perder os ${g.pv} da forma suprema, fica com 0 PV e morrendo. Clique de novo para desativar mesmo assim.`);
+  }
+  delete ultConfirm[k];
+  s.pv.max = Math.max(0, num(s.pv.max) - g.pv); s.pv.atual = clamp(num(s.pv.atual) - g.pv, 0, num(s.pv.max));
+  s.pd.max = Math.max(0, num(s.pd.max) - g.pd); s.pd.atual = clamp(num(s.pd.atual) - g.pd, 0, num(s.pd.max));
+  const rod = num(u.rodada); u.ativo = false; u.rodada = 0; u.ganho = null;
+  touchSheet(s); render();
+  announce(`${s.header.personagem} desfaz ${u.nome || "a forma suprema"} após ${rod} rodada${rod === 1 ? "" : "s"} (ação livre): −${g.pv} PV e −${g.pd} PD atuais e máximos, −${num(u.def)} Defesa.${num(s.pv.atual) <= 0 ? " Ficou com 0 PV e está morrendo!" : ""}`);
+}
+// Chamado a cada "Nova rodada": a forma mantida cobra o custo por rodada adicional
+function ultRodada(s) {
+  if (!ultOn(s)) return;
+  const u = s.ult; u.rodada = num(u.rodada) + 1;
+  const c = Math.max(0, num(u.custoRodada)); if (!c) return;
+  const bar = mentalBar(s); bar.atual = Math.max(0, num(bar.atual) - c);
+  setTimeout(() => announce(`⚡ ${s.header.personagem} mantém ${u.nome || "a forma suprema"} (rodada ${u.rodada}): −${c} ${ultPagaSig(s)} (${num(bar.atual)}/${num(bar.max)}).${num(bar.atual) <= 0 ? " Enlouquecendo! Se ficar insano nesta forma, vira um NPC da intenção assassina." : ""}`), 30);
 }
 function barHTML(k, title, b) {
   return `<div class="bar ${k}">
@@ -1099,7 +1270,7 @@ function tabMesa() {
   const opts = PERICIAS.map(([n]) => `<option>${esc(n)}</option>`).join("");
   return `<section class="card"><h3>Personagens</h3>
     ${all.length ? `<table class="mesa"><thead><tr><th>Personagem</th><th>PV</th><th>PD/PE</th><th>Def</th><th>Esq</th></tr></thead><tbody>
-    ${all.map((x) => `<tr><td><button class="link" data-open="${x.id}">${esc(x.header.personagem)}</button><div class="muted">${esc(x.owner?.name || "")}${x.condicoes.length ? " · " + esc(x.condicoes.join(", ")) : ""}</div></td>
+    ${all.map((x) => `<tr><td><button class="link" data-open="${x.id}">${esc(x.header.personagem)}</button>${ultOn(x) ? ` <span class="ult-mk" title="Na forma suprema (rodada ${num(x.ult.rodada)})">⚡</span>` : ""}<div class="muted">${esc(x.owner?.name || "")}${x.condicoes.length ? " · " + esc(x.condicoes.join(", ")) : ""}</div></td>
       <td class="${num(x.pv.atual) <= 0 ? "over" : ""}">${num(x.pv.atual)}/${num(x.pv.max)}</td><td class="${num(mentalBar(x).atual) <= 0 ? "over" : ""}">${num(x.pd.atual)}/${num(x.pd.max)} ${resSig(x)}${isDet(x) ? "" : `<div class="muted small">SAN ${num(x.san.atual)}/${num(x.san.max)}</div>`}</td>
       <td>${defesaTotal(x)}</td><td>${defesaTotal(x) + periciaTotal(x, "Reflexos")}</td></tr>`).join("")}</tbody></table>` : `<p class="muted">Nenhuma ficha ainda.</p>`}
     <div class="row wrap" style="margin-top:8px"><button id="btnAskSheets">Pedir fichas aos jogadores</button><button id="btnRoundAll">⏭ Nova rodada para todos</button><button id="btnCenaAll">🎬 Fim de cena para todos</button></div>
@@ -1124,8 +1295,9 @@ function tabContent(s) {
     case "principal": return tabPrincipal(s);
     case "pericias": return tabPericias(s);
     case "combate": return `${nextModBar()}${filterBar("ataques")}<div class="section-title">Ataques</div>${listHTML("ataques")}`;
-    case "habilidades": return `<button class="libbtn" data-lib="habilidades">📚 Adicionar do livro</button>${filterBar("habilidades")}<div class="section-title">Habilidades</div>${listHTML("habilidades")}`;
-    case "rituais": return `<section class="card grid2"><label>DT dos rituais ${inp("rituais.dt", s.rituais.dt, "num")}</label>
+    case "ult": return tabUlt(s);
+    case "habilidades": return `${ultOn(s) && s.ult.habilidades.length ? `<section class="card ult-card"><h3>⚡ Só na ${esc(s.ult.nome || "forma suprema")}</h3>${s.ult.habilidades.map((h, i) => `<div class="ult-hab"><div><b>${esc(h.nome || "(sem nome)")}</b>${h.alvo ? ` <span class="tag">aprimora ${esc(h.alvo)}</span>` : ""}<div class="muted small">${esc(resumo(h.desc, 200))}</div></div>${SCHEMAS.ultHabs.actions(`ult.habilidades.${i}`, h)}</div>`).join("")}</section>` : ""}<button class="libbtn" data-lib="habilidades">📚 Adicionar do livro</button>${filterBar("habilidades")}<div class="section-title">Habilidades</div>${listHTML("habilidades")}`;
+    case "rituais": return `<section class="card grid2"><label>DT dos rituais ${inp("rituais.dt", s.rituais.dt, "num")}${dtRitual(s) !== num(s.rituais.dt) ? `<span class="ult-txt">⚡ Na forma suprema: DT ${dtRitual(s)}</span>` : ""}</label>
         <label>PD nesta rodada<div class="calc small" data-calc="pdRodada"></div></label>
         <p class="muted wide">Custo: 1º círculo 1 PD · 2º 3 PD · 3º 6 PD · 4º 10 PD (+ extra da versão). ${s.header.afinidade ? `★ = afinidade com ${esc(s.header.afinidade)}.` : ""}</p></section>
       <button class="libbtn" data-lib="rituais">📚 Adicionar ritual do livro</button>
@@ -1204,9 +1376,9 @@ function quickHTML(s) {
 }
 function renderQuick() {
   const s = cur();
-  document.body.classList.add("quick-mode"); document.body.dataset.tema = temaEf(s);
+  document.body.classList.add("quick-mode"); document.body.dataset.tema = temaEf(s); document.body.classList.toggle("ult-on", !!(s && ultOn(s)));
   if (!s) { app.innerHTML = `<div class="qk-wrap"><p class="muted">Ficha não encontrada neste navegador.</p></div>`; return; }
-  app.innerHTML = `<div class="qk-wrap"><div class="qk-head"><b>${esc(s.header.personagem)}</b><span>PV ${num(s.pv.atual)}/${num(s.pv.max)} · ${resSig(s)} ${num(s.pd.atual)}/${num(s.pd.max)}${isDet(s) ? "" : ` · SAN ${num(s.san.atual)}/${num(s.san.max)}`} · ${resSig(s)} na rodada ${num(s.pdRodada)}/${pdLimite(s)}</span></div>${quickHTML(s)}<p class="qk-last" id="qkLast"></p></div>`;
+  app.innerHTML = `<div class="qk-wrap"><div class="qk-head"><b>${esc(s.header.personagem)}</b><span>PV ${num(s.pv.atual)}/${num(s.pv.max)} · ${resSig(s)} ${num(s.pd.atual)}/${num(s.pd.max)}${isDet(s) ? "" : ` · SAN ${num(s.san.atual)}/${num(s.san.max)}`} · ${resSig(s)} na rodada ${num(s.pdRodada)}/${pdLimite(s)}</span></div>${s.ult?.habilitada ? `<div class="qk-ult">${ultBotao(s)}</div>` : ""}${quickHTML(s)}<p class="qk-last" id="qkLast"></p></div>`;
   commitBase(s);
   if (!isDet(s)) translateDom(app);
 }
@@ -1260,6 +1432,7 @@ function efeitosCard(s) {
 }
 function novaRodada(s) {
   s.pdRodada = 0; const fim = tickEfeitos(s, "rodada");
+  ultRodada(s);
   return fim;
 }
 function fimDeCena(s) { const fim = tickEfeitos(s, "cena"); s.pdRodada = 0; return fim; }
@@ -1282,7 +1455,7 @@ function dyingAction(s, k, op) {
   const morr = k === "morrendo"; const nome = s.header.personagem;
   if (op === "turno") {
     s[k] = Math.min(3, num(s[k]) + 1);
-    if (s[k] >= 3) announce(morr ? `☠ ${nome} começou o terceiro turno morrendo e morreu.` : `✖ ${nome} começou o terceiro turno enlouquecendo e ficou insano.`);
+    if (s[k] >= 3) announce(morr ? `☠ ${nome} começou o terceiro turno morrendo e morreu.` : `✖ ${nome} começou o terceiro turno enlouquecendo e ficou insano.${ultOn(s) ? ` Na ${s.ult.nome || "forma suprema"}, agora é um NPC controlado pela intenção assassina.` : ""}`);
     else announce(`${nome} começou o turno ${morr ? "morrendo" : "enlouquecendo"} (${s[k]}/3).`);
   } else if (op === "voltar") s[k] = Math.max(0, num(s[k]) - 1);
   else if (op === "salvo") {
@@ -2127,7 +2300,8 @@ function render() {
   const vis = allVisible();
   if (!cur() && vis.length) store.currentId = vis[0].s.id;
   const s = cur();
-  if (!tabsFor().some(([k]) => k === tab)) tab = "principal";
+  if (!tabsFor().some(([k]) => k === tab) && !(tab === "ult" && s)) tab = "principal";
+  document.body.classList.toggle("ult-on", !!(s && ultOn(s)));
   const scroll = window.scrollY;
   document.body.dataset.tema = temaEf(s);
   document.body.classList.toggle("sem-fundo", !fundoOn);
@@ -2144,6 +2318,7 @@ function render() {
     ${selector}
     ${isGM() ? `<button class="icon ${hiddenRolls ? "on" : ""}" id="btnHidden" title="Rolagens ocultas (só você vê)">${hiddenRolls ? "🙈" : "👁"}</button>`
       : obrOk ? `<button class="icon ${secretRoll ? "on" : ""}" id="btnSecret" title="${secretRoll ? "Rolagem secreta ligada: só o mestre vê" : "Rolar em segredo (só o mestre vê)"}">${secretRoll ? "🙈" : "👁"}</button>` : ""}
+    ${s ? `<button class="icon ult-btn ${ultOn(s) ? "on" : s.ult?.habilitada ? "ready" : ""}" data-tab="ult" title="${ultOn(s) ? `Forma suprema ativa (rodada ${num(s.ult.rodada)})` : "Versão ultimate da ficha (forma suprema)"}">ULT</button>` : ""}
     ${s ? `<button class="icon" id="btnUndo" title="Desfazer a última alteração" ${(undoStack[s.id] || []).length ? "" : "disabled"}>↶</button>` : ""}
     <button class="icon" id="btnNew" title="Nova ficha">＋</button>
     <button class="icon ${backupDot ? "dot" : ""}" id="btnMenu" title="${backupDot ? "Há fichas sem backup recente" : "Mais opções"}">⋯</button>
@@ -2195,6 +2370,7 @@ app.addEventListener("input", (e) => {
     if (el.dataset.min != null) v = clamp(v, Number(el.dataset.min), Number(el.dataset.max));
   }
   const nexAntes = p === "nex" ? num(s.nex) : null;
+  if (p === "ult.habilitada" && !v && s.ult.ativo) ultDesativar(s, true);
   setPath(s, p, v);
   if (p === "nex" && num(v) > nexAntes) setTimeout(() => nexDialog(s, nexAntes, num(v)), 50);
   if (p === "equip.patente" && PATENTE_TAB[v]) { s.equip.credito = PATENTE_TAB[v].credito; s.equip.limites = [...PATENTE_TAB[v].lim]; toast(`${v}: crédito ${PATENTE_TAB[v].credito} e limites de itens aplicados (Tabela 3.1).`); }
@@ -2319,6 +2495,8 @@ app.addEventListener("click", async (e) => {
   if (b.id === "btnHealPD") return curar(s, document.getElementById("dmgVal").value, "pd");
   if (b.id === "btnHealSAN") return curar(s, document.getElementById("dmgVal").value, "san");
   if (b.id === "btnAddRd") { (s.rdTipos ||= []).push({ tipo: TIPOS_DANO[0], valor: 5 }); touch(); render(); return; }
+  if (b.id === "btnUltOn") return ultAtivar(s, b);
+  if (b.id === "btnUltOff") return ultDesativar(s, false, b);
   if (b.id === "btnDesejo") {
     s.pvTemp = num(s.pvTemp) + 15; if (num(s.pv.atual) <= 0) s.pv.atual = 1; s.morrendo = 0;
     touch(); render(); announce(`${s.header.personagem} encara o limiar e retorna (Desejo): +15 PV temporários.`); return;
