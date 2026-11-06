@@ -132,3 +132,7 @@ Baseada em *Arquivos Secretos 2: Hexatombe*, p. 96–97 (“As máscaras na sua 
 - Enlouquecendo na forma suprema: a ficha lembra que, se ficar insano, o personagem vira um NPC controlado pela intenção assassina.
 
 Arquivos para trocar: `app.js`, `style.css`, `index.html`, `manifest.json` e este `LEIA-ME.md`.
+
+## Novidades da versão 3.11
+
+- **Prato do mestre** (aba Pratos da mesa, só para o mestre): mostra as rolagens do mestre feitas aqui, no Hexatombe e no Painel do Mestre, inclusive as ocultas. Fica só no navegador do mestre; os jogadores nunca veem.

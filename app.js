@@ -1,6 +1,6 @@
 import OBR, { buildShape, buildText } from "https://cdn.jsdelivr.net/npm/@owlbear-rodeo/sdk@3.1.0/+esm";
-import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.10.0";
-import * as FX from "./efeitos.js?v=3.10.0";
+import { buscarCris, crisParaFicha, crisId } from "./cris.js?v=3.11.0";
+import * as FX from "./efeitos.js?v=3.11.0";
 
 /* =========================================================
    Ficha de Ordem Paranormal — extensão para Owlbear Rodeo
@@ -647,10 +647,11 @@ function announce(text, forceHidden = false) {
   trayText(text);
   soltarDrama(hidden || secret);
   const id = addLog(text, me.name, hidden || secret);
+  if (isGM()) shareDiceSoon(text); // vai para o prato do mestre (só no navegador do mestre)
   if (obrOk) {
     OBR.notification.show((hidden || secret ? "🙈 " : "") + text.split("\n")[0] + (secret ? " (só o mestre vê)" : ""));
     if (secret) send({ t: "roll", text, who: me.name, secret: true, id });
-    else if (!hidden) { send({ t: "roll", text, who: me.name, id }); shareDiceSoon(text); }
+    else if (!hidden) { send({ t: "roll", text, who: me.name, id }); if (!isGM()) shareDiceSoon(text); }
   } else toast(text);
 }
 function testLine(s, pericia, isAttack, extraBonus = 0, opts = {}) {
@@ -1906,8 +1907,19 @@ let curRoll = { groups: [], at: 0 };
 let diceShareTimer = null;
 const feedKey = () => storeKey + ":feed";
 function readFeed() { return readLs(feedKey(), {}); }
+/* Prato do mestre: as rolagens do mestre (aqui, no Hexatombe e no Painel do Mestre)
+   ficam só no navegador dele, nunca vão para a sala */
+const PM_NS = "io.github.pebarrosdenashor.prato-mestre";
+const pmKey = () => `${PM_NS}:${storeKey.startsWith(NS + ":") && storeKey !== NS + ":local" ? storeKey.slice(NS.length + 1) : "local"}`;
+function guardarPratoMestre(text) {
+  if (Date.now() - curRoll.at > 4000 || !curRoll.groups.length) return;
+  const h = readLs(pmKey(), []);
+  h.unshift({ id: uid(), at: Date.now(), origem: "Ficha", text, groups: curRoll.groups.slice(0, 12).map(({ f, vals, keep, worst }) => ({ f, vals: vals.slice(0, 24), keep, worst })), cfg: diceCfg });
+  lsSet(pmKey(), JSON.stringify(h.slice(0, 20)));
+}
 function shareDiceSoon(text) {
-  if (!obrOk || isGM()) return; // as rolagens do mestre não aparecem nos pratos da mesa
+  if (isGM()) { clearTimeout(diceShareTimer); diceShareTimer = setTimeout(() => { guardarPratoMestre(text); if (tab === "pratos") softRender(); }, 700); return; }
+  if (!obrOk) return; // as rolagens do mestre não aparecem nos pratos da mesa
   clearTimeout(diceShareTimer);
   diceShareTimer = setTimeout(() => {
     if (Date.now() - curRoll.at > 4000 || !curRoll.groups.length) return;
@@ -1927,10 +1939,22 @@ function staticDice(groups, cfg) {
     `<div class="die mini s-${esc(cfg?.estilo || "solido")} done ${g.keep === i ? (g.worst ? "keep worst" : "keep") : g.keep >= 0 ? "drop" : ""} ${g.f === 20 && v === 20 ? "nat20" : ""}">
       <svg viewBox="0 0 100 100"><polygon class="body" points="${SHAPES[g.f] || SHAPES[20]}"/><g class="lines">${INNER[g.f] || ""}</g></svg><span>${v}</span></div>`)).join("")}</div>`;
 }
+function pratoMestreHTML() {
+  const h = readLs(pmKey(), []); const fmtT = (t) => new Date(t).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
+  const r = h[0];
+  return `<section class="card prato-card ${r && Date.now() - r.at < 3000 ? "new" : ""}"><div class="row between"><h3>🙈 Prato do mestre</h3><span class="muted small">só você vê</span></div>
+    <p class="muted small">Os dados que você rola aqui, no Hexatombe e no Painel do Mestre. Nada disso vai para os jogadores.</p>
+    ${r ? `<div class="row between"><b class="pc-name">${esc(r.origem || "")}</b><span class="muted small">${fmtT(r.at)}</span></div>
+      ${staticDice(r.groups || [], r.cfg)}
+      <div class="pc-res">${String(r.text || "").split("\n").map((l) => `<div>${esc(l)}</div>`).join("")}</div>
+      ${h.length > 1 ? `<details><summary class="muted small">Rolagens anteriores</summary>${h.slice(1).map((o) => `<div class="pc-old"><span class="muted small">${fmtT(o.at)} · ${esc(o.origem || "")}</span> ${esc(String(o.text || "").split("\n")[0])}</div>`).join("")}</details>` : ""}
+      <button class="ghost" id="btnPmClear">Limpar prato do mestre</button>` : `<p class="muted">Nenhuma rolagem do mestre ainda.</p>`}
+  </section>`;
+}
 function tabPratos() {
   const f = readFeed(); const ids = Object.keys(f).sort((a, b) => (f[b].rolls[0]?.at || 0) - (f[a].rolls[0]?.at || 0));
   const fmtT = (t) => new Date(t).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" });
-  return `<section class="card"><h3>Pratos da mesa</h3><p class="muted">As últimas rolagens de cada jogador, com os dados do jeito que cada um personalizou. Só aparecem aqui: ninguém é obrigado a ver. As rolagens do mestre e as secretas não entram.</p>
+  return `${isGM() ? pratoMestreHTML() : ""}<section class="card"><h3>Pratos da mesa</h3><p class="muted">As últimas rolagens de cada jogador, com os dados do jeito que cada um personalizou. Só aparecem aqui: ninguém é obrigado a ver. As rolagens do mestre e as secretas não entram.</p>
     ${ids.length ? "" : `<p class="muted">Nenhuma rolagem dos outros jogadores ainda.</p>`}</section>
     ${ids.map((pid) => { const e = f[pid]; const r = e.rolls[0]; if (!r) return "";
       return `<section class="card prato-card ${Date.now() - r.at < 3000 ? "new" : ""}"><div class="row between"><b class="pc-name">${esc(e.char || e.who)}</b><span class="muted small">${esc(e.who)} · ${fmtT(r.at)}</span></div>
@@ -2439,6 +2463,7 @@ app.addEventListener("click", async (e) => {
   if (d.trilha) return trilhaDialog(s);
   if (d.trilhaok && s) { const t = trilhaAtual(s); if (t) { const n = aplicarTrilha(s, t, -1, num(s.nex)); s.header.trilhaKey = t.key; touch(); render(); toast(`${n} habilidade(s) da trilha adicionada(s) na aba Habilidades.`); } return; }
   if (b.id === "btnSecret") { secretRoll = !secretRoll; toast(secretRoll ? "Rolagem secreta: só o mestre verá os resultados." : "Rolagens visíveis para todos de novo."); render(); return; }
+  if (b.id === "btnPmClear") { lsSet(pmKey(), "[]"); render(); return; }
   if (b.id === "btnFeedClear") { lsSet(feedKey(), "{}"); render(); return; }
   if (b.id === "btnHidden") { hiddenRolls = !hiddenRolls; toast(hiddenRolls ? "Rolagens ocultas: só você vê os resultados." : "Rolagens visíveis para todos."); render(); return; }
   if (b.id === "btnGoMesa") { tab = "mesa"; render(); return; }
@@ -2799,7 +2824,7 @@ function checkOpenRequest() {
 window.addEventListener("storage", (e) => {
   if (e.key === OPEN_KEY) return checkOpenRequest();
   if (e.key === reqKey()) return softRender();
-  if (e.key === feedKey()) { if (tab === "pratos") softRender(); return; }
+  if (e.key === feedKey() || e.key === pmKey()) { if (tab === "pratos") softRender(); return; }
   if (e.key === storeKey + ":log") { // rolagem feita na janelinha do acesso rápido (ou em outra janela da ficha)
     try { rollLog = JSON.parse(e.newValue || "[]"); } catch { rollLog = []; }
     if (tab === "rolagens" || tab === "dados") softRender();
